@@ -1,0 +1,35 @@
+name: stock_app
+description: "A comprehensive Warehouse Management System - Stock Tereaq"
+publish_to: 'none'
+version: 1.0.0+1
+
+environment:
+  sdk: ^3.9.2
+
+dependencies:
+  flutter:
+    sdk: flutter
+  cupertino_icons: ^1.0.8
+  flutter_map: ^8.3.0
+  # ---- منطق المصادقة والـ API مأخوذ من المشروع الأول ----
+  provider: ^6.1.2
+  dio: ^5.7.0
+  shared_preferences: ^2.3.2
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+# ============================================================
+#  FLUTTER SPECIFIC CONFIGURATIONS
+# ============================================================
+flutter:
+  uses-material-design: true
+
+  # مسافة بادئة دقيقة (مسافتين عن بداية flutter) بدون أي تكرار
+  fonts:
+    - family: Inter
+      fonts:
+        - asset: assets/Inter_18pt-Regular.ttf
+          weight: 700
