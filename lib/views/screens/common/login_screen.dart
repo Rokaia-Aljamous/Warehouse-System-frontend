@@ -4,6 +4,7 @@ import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:stock_app/providers/auth_provider.dart';
 import 'package:stock_app/views/widgets/auth_widgets.dart';
+import 'package:stock_app/views/widgets/main_shell.dart';
 import '../../../utils/constants.dart';
 import '../warehouse/warehouse_home.dart';
 // 🌟 كلاس السائق في المشروع الثاني اسمه MyTasksScreen (موجود في driver/driver_home_screen.dart)
@@ -185,7 +186,7 @@ class _LoginScreenState extends State<LoginScreen> {
         return;
       }
 
-      // 🌟 التوجيه حسب دور المستخدم (staff → مستودع / driver → سائق)
+      // 🌟 التوجيه حسب دور المستخدم (staff → مستودع (مع الشريط عبر MainShell) / driver → سائق)
       final role = authProvider.currentRole;
 
       Navigator.pushAndRemoveUntil(
@@ -193,7 +194,7 @@ class _LoginScreenState extends State<LoginScreen> {
         MaterialPageRoute(
           builder: (_) => role == 'driver'
               ? const MyTasksScreen()
-              : const WarehouseHome(),
+              : const MainShell(),
         ),
         (route) => false,
       );
@@ -289,7 +290,7 @@ class _ProtectionBottomSheetState extends State<_ProtectionBottomSheet> {
         context,
         MaterialPageRoute(
           builder: (_) =>
-              role == 'driver' ? const MyTasksScreen() : const WarehouseHome(),
+              role == 'driver' ? const MyTasksScreen() : const MainShell(),
         ),
         (route) => false,
       );

@@ -2,16 +2,8 @@
 //
 // مزود الحالة (State Management) لكل ما يخص الـ Authentication.
 // يُغلّف AuthService ويُعرف الواجهات على حالة الـ Auth فقط (لا تتعامل الواجهات مع Dio مباشرة).
-//
-// الحالة المكشوفة للواجهات:
-//   - isLoading           : هل توجد عملية جارية؟
-//   - isInitializing      : هل التطبيق لا يزال يستعيد الجلسة عند الإقلاع؟
-//   - isAuthenticated     : هل العامل مسجّل دخوله (يوجد Token صالح)؟
-//   - mustChangePassword  : هل يجب تغيير كلمة المرور عند أول دخول؟
-//   - errorMessage        : آخر رسالة خطأ (تُستخدم لإظهارها في الـ UI).
-//   - phoneNumber         : رقم الهاتف المُستخدم في تدفّق OTP (يُحفظ بين شاشتي Forgot و Reset).
-//   - currentRole         : دور العامل الحالي ('driver' أو 'staff') — يُستخدم للتوجيه بعد الدخول.
 
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:stock_app/services/auth_service.dart';
 
@@ -25,6 +17,16 @@ class AuthProvider extends ChangeNotifier {
   bool mustChangePassword = false;
   String? errorMessage;
   String? phoneNumber;
+
+  // ---- بيانات البروفايل (تُجلب من GET /profile) ----
+  bool isProfileLoading = false;
+  String? profileFullName;
+  String? profileBirthday;
+  String? profilePhoneNumber;
+  String? profileUserName;
+  String? profileImageUrl;
+  String? profileRole;
+  int? profileWarehouseId;
 
   // ============================================================
   // 1) تهيئة التطبيق عند الفتح — يسترجع الجلسة المحفوظة
@@ -84,6 +86,14 @@ class AuthProvider extends ChangeNotifier {
     isAuthenticated = false;
     mustChangePassword = false;
     phoneNumber = null;
+    // تنظيف بيانات البروفايل أيضاً عند الخروج
+    profileFullName = null;
+    profileBirthday = null;
+    profilePhoneNumber = null;
+    profileUserName = null;
+    profileImageUrl = null;
+    profileRole = null;
+    profileWarehouseId = null;
     notifyListeners();
   }
 
@@ -218,7 +228,8 @@ class AuthProvider extends ChangeNotifier {
   }
 
   // ============================================================
-  // 6) تغيير كلمة المرور (إلزامي عند أول تسجيل دخول)
+  // 6) تغيير كلمة المرور (إلزامي عند أول تسجيل دخول فقط — الباك
+  //    برفض 403 أي استدعاء لهاد الدالة إذا must_change_password=false)
   // ============================================================
   Future<bool> changePassword({
     required String password,
@@ -269,4 +280,81 @@ class AuthProvider extends ChangeNotifier {
   // 7) قراءة دور العامل الحالي — تُستخدم للتوجيه بعد الدخول
   // ============================================================
   String? get currentRole => AuthService.user?.role;
+
+  // ============================================================
+  // 8) جلب بيانات البروفايل (GET /profile)
+  // ============================================================
+  Future<void> fetchProfile() async {
+    isProfileLoading = true;
+    notifyListeners();
+
+    final result = await _authService.getProfile();
+
+    isProfileLoading = false;
+
+    if (result['success'] == true) {
+      final data = result['data'] as Map<String, dynamic>;
+      profileFullName = data['full_name']?.toString();
+      profileBirthday = data['birthday']?.toString();
+      profilePhoneNumber = data['phone_number']?.toString();
+      profileUserName = data['user_name']?.toString();
+      profileImageUrl = data['profile_image']?.toString();
+      profileRole = data['role']?.toString();
+      profileWarehouseId = (data['warehouse_id'] as num?)?.toInt();
+      notifyListeners();
+      return;
+    }
+
+    errorMessage = result['message']?.toString() ?? 'Failed to load profile';
+    notifyListeners();
+  }
+
+  // ============================================================
+  // 9) تعديل البروفايل (PATCH /profile)
+  // ============================================================
+  Future<bool> updateProfile({
+    required String fullName,
+    required String phoneNumber,
+    String? birthday,
+    File? profileImage,
+  }) async {
+    if (fullName.trim().isEmpty || phoneNumber.trim().isEmpty) {
+      errorMessage = 'Please fill in the required fields';
+      notifyListeners();
+      return false;
+    }
+
+    isLoading = true;
+    errorMessage = null;
+    notifyListeners();
+
+    final result = await _authService.updateProfile(
+      fullName: fullName,
+      phoneNumber: phoneNumber,
+      birthday: birthday,
+      profileImage: profileImage,
+    );
+
+    isLoading = false;
+
+    if (result['success'] == true) {
+      profileFullName = fullName.trim();
+      profilePhoneNumber = phoneNumber.trim();
+      if (birthday != null && birthday.isNotEmpty) profileBirthday = birthday;
+      final data = result['data'];
+      if (data is Map && data['profile'] is Map) {
+        final p = Map<String, dynamic>.from(data['profile'] as Map);
+        if (p['profile_image'] != null) {
+          profileImageUrl = p['profile_image'].toString();
+        }
+      }
+      errorMessage = null;
+      notifyListeners();
+      return true;
+    }
+
+    errorMessage = result['message']?.toString() ?? 'Failed to update profile';
+    notifyListeners();
+    return false;
+  }
 }

@@ -19,7 +19,15 @@ class ProfileScreen extends StatefulWidget {
 class _ProfileScreenState extends State<ProfileScreen> {
   bool _isLoggingOut = false;
 
-  // ---- تسجيل الخروج عبر AuthProvider (يستدعي الـ Backend أولاً ثم يمسح الجلسة) ----
+  @override
+  void initState() {
+    super.initState();
+    // نجيب بيانات البروفايل الحقيقية من الـ Backend فور فتح الشاشة.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      Provider.of<AuthProvider>(context, listen: false).fetchProfile();
+    });
+  }
+
   Future<void> _handleLogout() async {
     if (_isLoggingOut) return;
 
@@ -30,7 +38,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
 
     if (!mounted) return;
 
-    // العودة إلى شاشة تسجيل الدخول مع مسح كامل الـ Stack.
     Navigator.pushAndRemoveUntil(
       context,
       MaterialPageRoute(
@@ -43,22 +50,22 @@ class _ProfileScreenState extends State<ProfileScreen> {
   @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
+    final auth = context.watch<AuthProvider>();
 
     return Scaffold(
       backgroundColor: AppColors.beige,
       body: Column(
         children: [
-          // الهيدر الخاص بالبروفايل
           ReceivingTopHeader(height: screenHeight * 0.22, title: 'Account'),
 
           Expanded(
             child: Transform.translate(
-              offset: const Offset(0, -50), // لرفع الكارد ليغطي جزءاً من الهيدر
+              offset: const Offset(0, -50),
               child: SingleChildScrollView(
                 padding: const EdgeInsets.symmetric(horizontal: 24),
                 child: Column(
                   children: [
-                    _buildProfileCard(context),
+                    _buildProfileCard(context, auth),
                     const SizedBox(height: 20),
                     _buildSettingsContainer(),
                   ],
@@ -71,7 +78,7 @@ class _ProfileScreenState extends State<ProfileScreen> {
     );
   }
 
-  Widget _buildProfileCard(BuildContext context) {
+  Widget _buildProfileCard(BuildContext context, AuthProvider auth) {
     return Container(
       padding: const EdgeInsets.all(24),
       decoration: BoxDecoration(
@@ -87,38 +94,64 @@ class _ProfileScreenState extends State<ProfileScreen> {
       ),
       child: Column(
         children: [
-          // الاسم
-          const Text(
-            "Ahmed Mohamed",
-            style: TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+          // صورة البروفايل (إن وُجدت) أو أيقونة افتراضية
+          CircleAvatar(
+            radius: 36,
+            backgroundColor: AppColors.beige,
+            backgroundImage: (auth.profileImageUrl != null &&
+                    auth.profileImageUrl!.isNotEmpty)
+                ? NetworkImage(auth.profileImageUrl!)
+                : null,
+            child: (auth.profileImageUrl == null ||
+                    auth.profileImageUrl!.isEmpty)
+                ? const Icon(Icons.person, size: 36, color: AppColors.navy)
+                : null,
           ),
-          const SizedBox(height: 16),
+          const SizedBox(height: 12),
 
-          // البريد الإلكتروني مع الأيقونة
-          Row(
-            children: const [
-              Icon(Icons.email_outlined, size: 20, color: Colors.black54),
-              SizedBox(width: 10),
-              Text(
-                "aamell123@gmail.com",
-                style: TextStyle(color: Colors.black87),
-              ),
-            ],
-          ),
-          const SizedBox(height: 10),
+          if (auth.isProfileLoading)
+            const Padding(
+              padding: EdgeInsets.symmetric(vertical: 12),
+              child: CircularProgressIndicator(),
+            )
+          else ...[
+            Text(
+              auth.profileFullName ?? '—',
+              style:
+                  const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+            ),
+            const SizedBox(height: 16),
 
-          // رقم الهاتف مع الأيقونة
-          Row(
-            children: const [
-              Icon(Icons.phone_outlined, size: 20, color: Colors.black54),
-              SizedBox(width: 10),
-              Text("0944993829", style: TextStyle(color: Colors.black87)),
-            ],
-          ),
+            // اسم المستخدم (لا يمكن تعديله — قيد من الباك اند)
+            Row(
+              children: [
+                const Icon(Icons.badge_outlined,
+                    size: 20, color: Colors.black54),
+                const SizedBox(width: 10),
+                Text(
+                  auth.profileUserName ?? '—',
+                  style: const TextStyle(color: Colors.black87),
+                ),
+              ],
+            ),
+            const SizedBox(height: 10),
+
+            // رقم الهاتف
+            Row(
+              children: [
+                const Icon(Icons.phone_outlined,
+                    size: 20, color: Colors.black54),
+                const SizedBox(width: 10),
+                Text(
+                  auth.profilePhoneNumber ?? '—',
+                  style: const TextStyle(color: Colors.black87),
+                ),
+              ],
+            ),
+          ],
 
           const SizedBox(height: 20),
 
-          // زر تعديل الملف الشخصي
           SizedBox(
             width: double.infinity,
             child: OutlinedButton(
@@ -158,7 +191,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             title: const Text("Dark Mode"),
             trailing: Switch(value: false, onChanged: (v) {}),
           ),
-          // ---- Logout tile: مربوط بـ AuthProvider.logout ----
           ListTile(
             leading: _isLoggingOut
                 ? const SizedBox(

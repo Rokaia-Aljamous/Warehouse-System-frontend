@@ -261,7 +261,7 @@ class AuthService {
     try {
       final response = await _dio.post(
         Api.verifyOtp,
-        data: {'phone_number': phoneNumber, 'otp': otp},
+        data: {'phone_number': phoneNumber, 'code': otp},
       );
 
       final body = response.data is Map<String, dynamic>
@@ -282,7 +282,7 @@ class AuthService {
 
       String? firstError;
       if (errors is Map) {
-        for (final field in ['otp', 'phone_number']) {
+        for (final field in ['code', 'phone_number']) {
           final list = errors[field];
           if (list is List && list.isNotEmpty) {
             firstError = list[0]?.toString();
@@ -435,6 +435,129 @@ class AuthService {
             firstError ??
             body['message']?.toString() ??
             'Failed to change password',
+      };
+    } on SocketException {
+      return {'success': false, 'message': 'No internet connection'};
+    } on TimeoutException {
+      return {
+        'success': false,
+        'message': 'Request timed out. Please try again.',
+      };
+    } on Exception catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  // ============================================================
+  // جلب بيانات البروفايل (GET /api/workers/profile)
+  // ============================================================
+  Future<Map<String, dynamic>> getProfile() async {
+    try {
+      final response = await _dio.get(Api.profile);
+
+      final body = response.data is Map<String, dynamic>
+          ? response.data as Map<String, dynamic>
+          : Map<String, dynamic>.from(response.data ?? {});
+
+      return {'success': true, 'statusCode': response.statusCode, 'data': body};
+    } on DioException catch (e) {
+      final body = e.response?.data is Map
+          ? Map<String, dynamic>.from(e.response!.data as Map)
+          : <String, dynamic>{};
+
+      return {
+        'success': false,
+        'statusCode': e.response?.statusCode,
+        'message': body['message']?.toString() ?? 'Failed to load profile',
+      };
+    } on SocketException {
+      return {'success': false, 'message': 'No internet connection'};
+    } on TimeoutException {
+      return {
+        'success': false,
+        'message': 'Request timed out. Please try again.',
+      };
+    } on Exception catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  // ============================================================
+  // تعديل البروفايل (PATCH /api/workers/profile)
+  // ملاحظة: full_name / phone_number / birthday كلهم اختياريون (nullable
+  // بالباك)، فبنرسل بس يلي انعبى فعلاً. profile_image اختياري كمان
+  // (يحتاج مستقبلاً image_picker إذا حبيتي تفعّلي رفع صورة).
+  // ============================================================
+  Future<Map<String, dynamic>> updateProfile({
+    String? fullName,
+    String? phoneNumber,
+    String? birthday, // بصيغة 'YYYY-MM-DD'
+    File? profileImage,
+  }) async {
+    try {
+      final formMap = <String, dynamic>{};
+
+      if (fullName != null && fullName.trim().isNotEmpty) {
+        formMap['full_name'] = fullName.trim();
+      }
+      if (phoneNumber != null && phoneNumber.trim().isNotEmpty) {
+        formMap['phone_number'] = phoneNumber.trim();
+      }
+      if (birthday != null && birthday.trim().isNotEmpty) {
+        formMap['birthday'] = birthday.trim();
+      }
+      if (profileImage != null) {
+        formMap['profile_image'] = await MultipartFile.fromFile(
+          profileImage.path,
+          filename: profileImage.path.split('/').last,
+        );
+      }
+
+      final response = await _dio.patch(
+        Api.profile,
+        data: FormData.fromMap(formMap),
+      );
+
+      final body = response.data is Map<String, dynamic>
+          ? response.data as Map<String, dynamic>
+          : Map<String, dynamic>.from(response.data ?? {});
+
+      return {
+        'success': true,
+        'statusCode': response.statusCode,
+        'data': body,
+        'message':
+            body['message']?.toString() ?? 'Profile updated successfully',
+      };
+    } on DioException catch (e) {
+      final body = e.response?.data is Map
+          ? Map<String, dynamic>.from(e.response!.data as Map)
+          : <String, dynamic>{};
+      final errors = body['errors'];
+
+      String? firstError;
+      if (errors is Map) {
+        for (final field in [
+          'full_name',
+          'phone_number',
+          'birthday',
+          'profile_image',
+        ]) {
+          final list = errors[field];
+          if (list is List && list.isNotEmpty) {
+            firstError = list[0]?.toString();
+            break;
+          }
+        }
+      }
+
+      return {
+        'success': false,
+        'statusCode': e.response?.statusCode,
+        'message':
+            firstError ??
+            body['message']?.toString() ??
+            'Failed to update profile',
       };
     } on SocketException {
       return {'success': false, 'message': 'No internet connection'};
