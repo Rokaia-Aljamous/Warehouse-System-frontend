@@ -1,14 +1,14 @@
-// lib/views/screens/warehouse/order_details.dart
+// lib/views/screens/warehouse/receiving_details.dart
 //
-// شاشة تفاصيل مهمة تحضير — مربوطة بالكامل مع الباك إند:
+// شاشة تفاصيل مهمة استلام شحنة - مربوطة بالكامل:
 //   GET  /workers/tasks/{taskId}          (تحميل التفاصيل)
 //   POST /workers/tasks/{taskId}/scan     (مسح كل منتج بكاميرا الموبايل)
 //   POST /workers/tasks/{taskId}/complete (تأكيد المهمة)
 //
 // حالات لون كل منتج:
-//   أحمر    -> لسا ما انمسح شي (pickedQty == 0)
-//   برتقالي -> انمسح جزء (0 < pickedQty < expectedQty)
-//   أخضر ✓  -> اكتمل (pickedQty >= expectedQty) -> أيقونة السكان بتختفي
+//   أحمر    -> لسا ما انمسح شي (receivedQty == 0)
+//   برتقالي -> انمسح جزء (0 < receivedQty < expectedQty)
+//   أخضر ✓  -> اكتمل (receivedQty >= expectedQty) -> أيقونة السكان بتختفي
 //              ومكانها إشارة صح
 //
 // لمسح أكثر من قطعة لنفس المنتج: بيكفي تضغطي زر السكان أكثر من مرة
@@ -22,15 +22,16 @@ import '../../../utils/constants.dart';
 import '../../../views/widgets/auth_widgets.dart';
 import '../../../views/widgets/barcode_scanner_sheet.dart';
 
-class OrderDetailsScreen extends StatefulWidget {
+class ReceivingDetailsScreen extends StatefulWidget {
   final int taskId;
-  const OrderDetailsScreen({super.key, required this.taskId});
+  const ReceivingDetailsScreen({super.key, required this.taskId});
 
   @override
-  State<OrderDetailsScreen> createState() => _OrderDetailsScreenState();
+  State<ReceivingDetailsScreen> createState() =>
+      _ReceivingDetailsScreenState();
 }
 
-class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
+class _ReceivingDetailsScreenState extends State<ReceivingDetailsScreen> {
   @override
   void initState() {
     super.initState();
@@ -41,7 +42,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   @override
   void dispose() {
-    // تنظيف الحالة عند مغادرة الشاشة عشان ما تبقى بيانات مهمة سابقة عالقة
     context.read<OrderController>().clearCurrentTask();
     super.dispose();
   }
@@ -62,7 +62,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
     if (outcome == ScanOutcome.success) {
       if (controller.scanError != null) {
-        // Matched لكن في تحذير (مثلاً "تم مسح كل الكمية بالفعل")
         _showSnack(controller.scanError!, isError: false);
       }
     } else {
@@ -167,8 +166,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           ),
           child: InkWell(
             onTap: () {
-              Navigator.pop(context); // إغلاق النافذة السفلية
-              Navigator.pop(context); // العودة لقائمة المهام
+              Navigator.pop(context);
+              Navigator.pop(context);
             },
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -208,7 +207,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         children: [
           ReceivingTopHeader(
             height: screenHeight * 0.22,
-            title: 'Order Details',
+            title: 'Shipment Details',
           ),
           Expanded(
             child: Consumer<OrderController>(
@@ -264,7 +263,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                               const Padding(
                                 padding: EdgeInsets.only(left: 8.0),
                                 child: Text(
-                                  'ITEMS IN ORDER',
+                                  'ITEMS IN SHIPMENT',
                                   style: TextStyle(
                                     fontFamily: 'Inter',
                                     fontSize: 13,
@@ -355,7 +354,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 }
 
 // ============================================================
-// كرت معلومات الطلب الأساسية (يختفي فور اكتمال مسح كل المنتجات)
+// كرت معلومات الشحنة الأساسية (يختفي فور اكتمال مسح كل المنتجات)
 // ============================================================
 class _InfoCard extends StatelessWidget {
   final TaskDetail task;
@@ -376,12 +375,12 @@ class _InfoCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.person_outline_rounded,
+              Icon(Icons.factory_outlined,
                   color: AppColors.navy.withOpacity(0.7), size: 24),
               const SizedBox(width: 16),
               Expanded(
                 child: Text(
-                  task.customerName ?? 'Customer',
+                  task.factoryName ?? 'Factory',
                   style: const TextStyle(
                     fontFamily: 'Inter',
                     fontSize: 18,
@@ -425,7 +424,7 @@ class _InfoCard extends StatelessWidget {
 }
 
 // ============================================================
-// كرت المنتج التفاعلي — سكان بكاميرا الموبايل فعلياً + 3 حالات لونية
+// كرت المنتج التفاعلي - سكان بكاميرا الموبايل فعلياً + 3 حالات لونية
 // ============================================================
 class _ProductScanCard extends StatelessWidget {
   final TaskOrderItem item;
@@ -491,7 +490,7 @@ class _ProductScanCard extends StatelessWidget {
                         size: 18, color: Colors.black54),
                     const SizedBox(width: 8),
                     Text(
-                      'Scanned: ${item.pickedQty} / ${item.expectedQty}',
+                      'Received: ${item.pickedQty} / ${item.expectedQty}',
                       style: const TextStyle(
                         fontFamily: 'Inter',
                         fontSize: 15,

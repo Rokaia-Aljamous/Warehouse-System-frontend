@@ -1,18 +1,12 @@
-// lib/views/screens/warehouse/order_details.dart
+// lib/views/screens/warehouse/recovery_details.dart
 //
-// شاشة تفاصيل مهمة تحضير — مربوطة بالكامل مع الباك إند:
+// شاشة تفاصيل مهمة مرتجع (Return) - مربوطة بالكامل:
 //   GET  /workers/tasks/{taskId}          (تحميل التفاصيل)
 //   POST /workers/tasks/{taskId}/scan     (مسح كل منتج بكاميرا الموبايل)
 //   POST /workers/tasks/{taskId}/complete (تأكيد المهمة)
 //
-// حالات لون كل منتج:
-//   أحمر    -> لسا ما انمسح شي (pickedQty == 0)
-//   برتقالي -> انمسح جزء (0 < pickedQty < expectedQty)
-//   أخضر ✓  -> اكتمل (pickedQty >= expectedQty) -> أيقونة السكان بتختفي
-//              ومكانها إشارة صح
-//
-// لمسح أكثر من قطعة لنفس المنتج: بيكفي تضغطي زر السكان أكثر من مرة
-// (كل مسحة = قطعة وحدة، لأن الباك إند ما بيدعم إرسال quantity دفعة وحدة).
+// ⚠️ ملاحظة: الباك إند ما بيرجع اسم الزبون لمهام المرتجع (فقط لـ Order)،
+// فبالكارد العلوي هون بنعرض "سبب الإرجاع" ورقم الطلب الأصلي بدل اسم الزبون.
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -22,15 +16,15 @@ import '../../../utils/constants.dart';
 import '../../../views/widgets/auth_widgets.dart';
 import '../../../views/widgets/barcode_scanner_sheet.dart';
 
-class OrderDetailsScreen extends StatefulWidget {
+class RecoveryDetailsScreen extends StatefulWidget {
   final int taskId;
-  const OrderDetailsScreen({super.key, required this.taskId});
+  const RecoveryDetailsScreen({super.key, required this.taskId});
 
   @override
-  State<OrderDetailsScreen> createState() => _OrderDetailsScreenState();
+  State<RecoveryDetailsScreen> createState() => _RecoveryDetailsScreenState();
 }
 
-class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
+class _RecoveryDetailsScreenState extends State<RecoveryDetailsScreen> {
   @override
   void initState() {
     super.initState();
@@ -41,7 +35,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
   @override
   void dispose() {
-    // تنظيف الحالة عند مغادرة الشاشة عشان ما تبقى بيانات مهمة سابقة عالقة
     context.read<OrderController>().clearCurrentTask();
     super.dispose();
   }
@@ -62,7 +55,6 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 
     if (outcome == ScanOutcome.success) {
       if (controller.scanError != null) {
-        // Matched لكن في تحذير (مثلاً "تم مسح كل الكمية بالفعل")
         _showSnack(controller.scanError!, isError: false);
       }
     } else {
@@ -116,8 +108,10 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                 .map(
                   (i) => ListTile(
                     dense: true,
-                    leading: const Icon(Icons.warning_amber_rounded,
-                        color: AppColors.orange),
+                    leading: const Icon(
+                      Icons.warning_amber_rounded,
+                      color: AppColors.orange,
+                    ),
                     title: Text(i.product),
                     subtitle: Text('${i.scanned} of ${i.expected} scanned'),
                   ),
@@ -167,8 +161,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
           ),
           child: InkWell(
             onTap: () {
-              Navigator.pop(context); // إغلاق النافذة السفلية
-              Navigator.pop(context); // العودة لقائمة المهام
+              Navigator.pop(context);
+              Navigator.pop(context);
             },
             child: Row(
               mainAxisAlignment: MainAxisAlignment.center,
@@ -208,27 +202,34 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
         children: [
           ReceivingTopHeader(
             height: screenHeight * 0.22,
-            title: 'Order Details',
+            title: 'Return Details',
           ),
           Expanded(
             child: Consumer<OrderController>(
               builder: (context, controller, _) {
-                if (controller.isLoadingDetails && controller.currentTask == null) {
+                if (controller.isLoadingDetails &&
+                    controller.currentTask == null) {
                   return const Center(child: CircularProgressIndicator());
                 }
 
-                if (controller.detailsError != null && controller.currentTask == null) {
+                if (controller.detailsError != null &&
+                    controller.currentTask == null) {
                   return Center(
                     child: Padding(
                       padding: const EdgeInsets.all(24),
                       child: Column(
                         mainAxisSize: MainAxisSize.min,
                         children: [
-                          const Icon(Icons.error_outline,
-                              color: Colors.redAccent, size: 40),
+                          const Icon(
+                            Icons.error_outline,
+                            color: Colors.redAccent,
+                            size: 40,
+                          ),
                           const SizedBox(height: 12),
-                          Text(controller.detailsError!,
-                              textAlign: TextAlign.center),
+                          Text(
+                            controller.detailsError!,
+                            textAlign: TextAlign.center,
+                          ),
                           const SizedBox(height: 12),
                           ElevatedButton(
                             onPressed: () =>
@@ -264,7 +265,7 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                               const Padding(
                                 padding: EdgeInsets.only(left: 8.0),
                                 child: Text(
-                                  'ITEMS IN ORDER',
+                                  'ITEMS TO RESTOCK',
                                   style: TextStyle(
                                     fontFamily: 'Inter',
                                     fontSize: 13,
@@ -312,7 +313,8 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                                       width: 22,
                                       height: 22,
                                       child: CircularProgressIndicator(
-                                          strokeWidth: 2),
+                                        strokeWidth: 2,
+                                      ),
                                     )
                                   : Row(
                                       mainAxisSize: MainAxisSize.min,
@@ -355,7 +357,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
 }
 
 // ============================================================
-// كرت معلومات الطلب الأساسية (يختفي فور اكتمال مسح كل المنتجات)
+// كرت معلومات المرتجع الأساسية (يختفي فور اكتمال مسح كل المنتجات)
+// بيعرض سبب الإرجاع + نوعه + رقم الطلب الأصلي (اسم الزبون مش متوفر
+// بالباك إند لهاد النوع من المهام)
 // ============================================================
 class _InfoCard extends StatelessWidget {
   final TaskDetail task;
@@ -376,15 +380,18 @@ class _InfoCard extends StatelessWidget {
         children: [
           Row(
             children: [
-              Icon(Icons.person_outline_rounded,
-                  color: AppColors.navy.withOpacity(0.7), size: 24),
+              Icon(
+                Icons.assignment_return_outlined,
+                color: AppColors.navy.withOpacity(0.7),
+                size: 24,
+              ),
               const SizedBox(width: 16),
               Expanded(
                 child: Text(
-                  task.customerName ?? 'Customer',
+                  task.returnReason ?? 'Return',
                   style: const TextStyle(
                     fontFamily: 'Inter',
-                    fontSize: 18,
+                    fontSize: 16,
                     fontWeight: FontWeight.w400,
                     color: Colors.black87,
                   ),
@@ -404,11 +411,37 @@ class _InfoCard extends StatelessWidget {
           const SizedBox(height: 16),
           Row(
             children: [
-              Icon(Icons.inventory_2_outlined,
-                  color: AppColors.navy.withOpacity(0.7), size: 24),
+              Icon(
+                Icons.receipt_long_outlined,
+                color: AppColors.navy.withOpacity(0.7),
+                size: 24,
+              ),
               const SizedBox(width: 16),
               Text(
-                '${task.items.length} products',
+                task.relatedOrderId != null
+                    ? 'Original Order #${task.relatedOrderId}'
+                    : 'Original order not linked',
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 15,
+                  fontWeight: FontWeight.w400,
+                  color: Colors.black87,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+          Row(
+            children: [
+              Icon(
+                Icons.inventory_2_outlined,
+                color: AppColors.navy.withOpacity(0.7),
+                size: 24,
+              ),
+              const SizedBox(width: 16),
+              Text(
+                '${task.items.length} products'
+                '${task.returnType != null ? ' • ${task.returnType}' : ''}',
                 style: const TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 15,
@@ -425,7 +458,7 @@ class _InfoCard extends StatelessWidget {
 }
 
 // ============================================================
-// كرت المنتج التفاعلي — سكان بكاميرا الموبايل فعلياً + 3 حالات لونية
+// كرت المنتج التفاعلي - سكان بكاميرا الموبايل فعلياً + 3 حالات لونية
 // ============================================================
 class _ProductScanCard extends StatelessWidget {
   final TaskOrderItem item;
@@ -487,11 +520,14 @@ class _ProductScanCard extends StatelessWidget {
                 const SizedBox(height: 6),
                 Row(
                   children: [
-                    const Icon(Icons.layers_outlined,
-                        size: 18, color: Colors.black54),
+                    const Icon(
+                      Icons.layers_outlined,
+                      size: 18,
+                      color: Colors.black54,
+                    ),
                     const SizedBox(width: 8),
                     Text(
-                      'Scanned: ${item.pickedQty} / ${item.expectedQty}',
+                      'Restocked: ${item.pickedQty} / ${item.expectedQty}',
                       style: const TextStyle(
                         fontFamily: 'Inter',
                         fontSize: 15,
@@ -505,8 +541,11 @@ class _ProductScanCard extends StatelessWidget {
                   const SizedBox(height: 4),
                   Row(
                     children: [
-                      const Icon(Icons.sell_outlined,
-                          size: 18, color: Colors.black54),
+                      const Icon(
+                        Icons.sell_outlined,
+                        size: 18,
+                        color: Colors.black54,
+                      ),
                       const SizedBox(width: 8),
                       Text(
                         item.brand!,

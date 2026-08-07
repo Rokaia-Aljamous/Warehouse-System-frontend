@@ -1,10 +1,19 @@
 // lib/views/screens/warehouse/my_orders_tab_screen.dart
+//
+// شاشة "Request List" (تبويبات Archive / Incoming / Request List) —
+// مربوطة بالكامل الآن بـ DestructionController:
+//   GET  /workers/disposals   -> تبويبَي Archive و Request List
+//   POST /workers/disposals   -> فورم "Destruction Request" (Submit Request)
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../../controllers/destruction_controller.dart';
+import '../../../controllers/order_controller.dart';
 import '../../../utils/constants.dart';
 import '../../../views/widgets/auth_widgets.dart';
 import 'archive_screen.dart';
 import 'incoming_screen.dart';
+import 'disposal_details_screen.dart';
 
 class MyOrdersTabScreen extends StatefulWidget {
   final int initialIndex;
@@ -32,6 +41,12 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
       if (!_tabController.indexIsChanging) {
         _setPageTitle(_tabController.index);
       }
+      setState(() {}); // لإظهار/إخفاء الـ FAB حسب التبويب الحالي
+    });
+
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<DestructionController>().fetchDisposals();
+      context.read<OrderController>().fetchDestructionTasks();
     });
   }
 
@@ -151,20 +166,135 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
   }
 
   Widget _buildMyOrderContent() {
-    return const SingleChildScrollView(
-      padding: EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
-      child: Column(
+    return Consumer<DestructionController>(
+      builder: (context, controller, _) {
+        if (controller.isLoadingList && controller.disposals.isEmpty) {
+          return const Center(child: CircularProgressIndicator());
+        }
+
+        if (controller.listError != null && controller.disposals.isEmpty) {
+          return Center(
+            child: Padding(
+              padding: const EdgeInsets.all(24),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  const Icon(Icons.error_outline,
+                      color: Colors.redAccent, size: 36),
+                  const SizedBox(height: 12),
+                  Text(controller.listError!, textAlign: TextAlign.center),
+                  const SizedBox(height: 12),
+                  ElevatedButton(
+                    onPressed: () => controller.fetchDisposals(),
+                    child: const Text('Retry'),
+                  ),
+                ],
+              ),
+            ),
+          );
+        }
+
+        final items = controller.disposals; // كل الطلبات يلي بعتها العامل بنفسه
+
+        if (items.isEmpty) {
+          return const Center(
+            child: Padding(
+              padding: EdgeInsets.symmetric(horizontal: 32),
+              child: Text(
+                'No requests yet — tap + to create a destruction request',
+                textAlign: TextAlign.center,
+                style: TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 15,
+                  color: Colors.black54,
+                ),
+              ),
+            ),
+          );
+        }
+
+        return RefreshIndicator(
+          onRefresh: () => controller.fetchDisposals(),
+          child: ListView.builder(
+            padding: const EdgeInsets.symmetric(horizontal: 24.0, vertical: 16.0),
+            itemCount: items.length,
+            itemBuilder: (context, index) {
+              final d = items[index];
+
+              return GestureDetector(
+                onTap: () {
+                  Navigator.push(
+                    context,
+                    MaterialPageRoute(
+                      builder: (context) =>
+                          DisposalDetailsScreen(disposalId: d.id),
+                    ),
+                  );
+                },
+                child: Container(
+                margin: const EdgeInsets.only(bottom: 16),
+                width: double.infinity,
+                decoration: BoxDecoration(
+                  color: Colors.white,
+                  borderRadius: BorderRadius.circular(16),
+                  border: Border.all(
+                    color: AppColors.navy.withOpacity(0.3),
+                    width: 1,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withOpacity(0.06),
+                      blurRadius: 6,
+                      offset: const Offset(0, 3),
+                    ),
+                  ],
+                ),
+                padding: const EdgeInsets.all(16),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      // raw status متل ما إجا من الباك بالضبط، بدون تخمين ألوان
+                      d.status ?? '-',
+                      style: const TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 20,
+                        fontWeight: FontWeight.w600,
+                        color: AppColors.navy,
+                      ),
+                    ),
+                    const SizedBox(height: 8),
+                    _buildInfoRow(Icons.inventory_2_outlined, d.displayTitle),
+                    _buildInfoRow(Icons.shopping_cart_outlined,
+                        'Qty: ${d.quantity} Units'),
+                    if (d.damageReason != null)
+                      _buildInfoRow(
+                          Icons.warning_amber_rounded, d.damageReason!),
+                  ],
+                ),
+                ),
+              );
+            },
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildInfoRow(IconData icon, String text) {
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 4),
+      child: Row(
         children: [
-          SizedBox(height: 40),
-          Opacity(
-            opacity: 0.4,
+          Icon(icon, size: 18, color: Colors.black54),
+          const SizedBox(width: 8),
+          Expanded(
             child: Text(
-              'No current requests',
-              style: TextStyle(
+              text,
+              style: const TextStyle(
                 fontFamily: 'Inter',
-                fontSize: 15,
-                color: AppColors.navy,
-                fontWeight: FontWeight.w500,
+                fontSize: 14,
+                color: Colors.black87,
               ),
             ),
           ),
@@ -179,14 +309,16 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
     int quantity = 1;
     bool isFormFilled = false;
 
+    final destructionController = context.read<DestructionController>();
+
     showModalBottomSheet(
       context: context,
       isScrollControlled: true,
       backgroundColor: Colors.transparent,
       barrierColor: Colors.black.withOpacity(0.4),
-      builder: (context) {
+      builder: (sheetContext) {
         return StatefulBuilder(
-          builder: (context, setModalState) {
+          builder: (sheetContext, setModalState) {
             void checkForm() {
               setModalState(() {
                 isFormFilled =
@@ -198,9 +330,43 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
             productController.addListener(checkForm);
             causeController.addListener(checkForm);
 
+            Future<void> handleSubmit() async {
+              setModalState(() {}); // يعكس isSubmitting فور الضغط
+
+              final success = await destructionController.createDisposal(
+                barcode: productController.text.trim(),
+                quantity: quantity,
+                damageReason: causeController.text.trim(),
+              );
+
+              if (!sheetContext.mounted) return;
+
+              if (success) {
+                Navigator.pop(sheetContext);
+                ScaffoldMessenger.of(context).showSnackBar(
+                  const SnackBar(
+                    content: Text('Destruction request submitted'),
+                    backgroundColor: AppColors.navy,
+                  ),
+                );
+                _tabController.animateTo(2); // اعرضلها فوراً بتبويب Request List (طلباتي)
+              } else {
+                setModalState(() {});
+                ScaffoldMessenger.of(sheetContext).showSnackBar(
+                  SnackBar(
+                    content: Text(
+                      destructionController.submitError ??
+                          'Failed to submit request',
+                    ),
+                    backgroundColor: Colors.redAccent,
+                  ),
+                );
+              }
+            }
+
             return Padding(
               padding: EdgeInsets.only(
-                bottom: MediaQuery.of(context).viewInsets.bottom,
+                bottom: MediaQuery.of(sheetContext).viewInsets.bottom,
               ),
               child: SingleChildScrollView(
                 child: Container(
@@ -264,7 +430,7 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
                         child: TextField(
                           controller: productController,
                           decoration: const InputDecoration(
-                            hintText: 'Enter product name or scan',
+                            hintText: 'Enter product barcode or scan',
                             hintStyle: TextStyle(
                               fontFamily: 'Inter',
                               fontSize: 14,
@@ -416,11 +582,9 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
                         width: double.infinity,
                         height: 52,
                         child: ElevatedButton(
-                          onPressed: isFormFilled
-                              ? () {
-                                  Navigator.pop(context);
-                                  _showDocumentationSheet(context);
-                                }
+                          onPressed: (isFormFilled &&
+                                  !destructionController.isSubmitting)
+                              ? handleSubmit
                               : null,
                           style: ElevatedButton.styleFrom(
                             backgroundColor: isFormFilled
@@ -437,17 +601,25 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
                               ),
                             ),
                           ),
-                          child: Text(
-                            'Submit Request',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              fontSize: 18,
-                              fontWeight: FontWeight.w500,
-                              color: isFormFilled
-                                  ? AppColors.navy
-                                  : Colors.grey,
-                            ),
-                          ),
+                          child: destructionController.isSubmitting
+                              ? const SizedBox(
+                                  width: 22,
+                                  height: 22,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                  ),
+                                )
+                              : Text(
+                                  'Submit Request',
+                                  style: TextStyle(
+                                    fontFamily: 'Inter',
+                                    fontSize: 18,
+                                    fontWeight: FontWeight.w500,
+                                    color: isFormFilled
+                                        ? AppColors.navy
+                                        : Colors.grey,
+                                  ),
+                                ),
                         ),
                       ),
                       const SizedBox(height: 20),
@@ -459,357 +631,6 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
           },
         );
       },
-    );
-  }
-
-  void _showDocumentationSheet(BuildContext context) {
-    bool isFilled = false;
-
-    showModalBottomSheet(
-      context: context,
-      isScrollControlled: true,
-      backgroundColor: Colors.transparent,
-      barrierColor: Colors.black.withOpacity(0.4),
-      builder: (context) {
-        return StatefulBuilder(
-          builder: (context, setModalState) {
-            return Container(
-              padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 20),
-              decoration: const BoxDecoration(
-                color: Colors.white,
-                borderRadius: BorderRadius.only(
-                  topLeft: Radius.circular(32),
-                  topRight: Radius.circular(32),
-                ),
-              ),
-              child: Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  // مقبض السحب
-                  Center(
-                    child: Container(
-                      width: 48,
-                      height: 4,
-                      decoration: BoxDecoration(
-                        color: Colors.black12,
-                        borderRadius: BorderRadius.circular(2),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // العنوان
-                  const Text(
-                    'Documentation',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 28,
-                      fontWeight: FontWeight.w500,
-                      color: Colors.black,
-                    ),
-                  ),
-                  const SizedBox(height: 24),
-
-                  // Scanner label
-                  Row(
-                    children: const [
-                      Icon(
-                        Icons.qr_code_scanner,
-                        color: Colors.black54,
-                        size: 22,
-                      ),
-                      SizedBox(width: 8),
-                      Text(
-                        'Scanner',
-                        style: TextStyle(
-                          fontFamily: 'Inter',
-                          fontSize: 16,
-                          color: Colors.black87,
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-
-                  // أيقونة الماسح
-                  Center(
-                    child: GestureDetector(
-                      onTap: () {
-                        setModalState(() => isFilled = true);
-                      },
-                      child: Container(
-                        width: 80,
-                        height: 80,
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.black26, width: 2),
-                          borderRadius: BorderRadius.circular(8),
-                        ),
-                        child: const Icon(
-                          Icons.qr_code_2,
-                          size: 50,
-                          color: Colors.black38,
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(height: 32),
-
-                  // أزرار cancel و done
-                  Row(
-                    children: [
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: () => Navigator.pop(context),
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: const Color(0xFFFF6B6B),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                            ),
-                            elevation: 0,
-                          ),
-                          child: const Text(
-                            'cancel',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                              color: Colors.white,
-                            ),
-                          ),
-                        ),
-                      ),
-                      const SizedBox(width: 16),
-                      Expanded(
-                        child: ElevatedButton(
-                          onPressed: isFilled
-                              ? () => Navigator.pop(context)
-                              : null,
-                          style: ElevatedButton.styleFrom(
-                            backgroundColor: isFilled
-                                ? const Color(0xFFBBF7D0)
-                                : const Color(0xFFE0E0E0),
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            shape: RoundedRectangleBorder(
-                              borderRadius: BorderRadius.circular(16),
-                              side: BorderSide(
-                                color: isFilled
-                                    ? const Color(0xFF90EE90)
-                                    : Colors.grey.shade300,
-                                width: 1,
-                              ),
-                            ),
-                            elevation: 0,
-                          ),
-                          child: Text(
-                            'done',
-                            style: TextStyle(
-                              fontFamily: 'Inter',
-                              fontSize: 16,
-                              fontWeight: FontWeight.w500,
-                              color: isFilled ? AppColors.navy : Colors.grey,
-                            ),
-                          ),
-                        ),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 20),
-                ],
-              ),
-            );
-          },
-        );
-      },
-    );
-  }
-
-  void _showOrderResultScreen(BuildContext context) {
-    Navigator.push(
-      context,
-      MaterialPageRoute(
-        builder: (_) => Scaffold(
-          backgroundColor: AppColors.beige,
-          body: Builder(
-            builder: (context) {
-              final screenHeight = MediaQuery.of(context).size.height;
-              return Column(
-                children: [
-                  ReceivingTopHeader(
-                    height: screenHeight * 0.22,
-                    title: 'Request List',
-                  ),
-                  const SizedBox(height: 16),
-                  Expanded(
-                    child: ListView(
-                      padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                      children: [
-                        Container(
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: AppColors.navy.withOpacity(0.3),
-                              width: 1,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.06),
-                                blurRadius: 6,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Rejected',
-                                style: TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.red,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              _buildOrderDetailRow(
-                                Icons.inventory_2_outlined,
-                                'Shipment Name',
-                              ),
-                              _buildOrderDetailRow(
-                                Icons.shopping_cart_outlined,
-                                'Qty: 1 Units',
-                              ),
-                              _buildOrderDetailRow(
-                                Icons.warning_amber_rounded,
-                                'Cause of damage',
-                              ),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: GestureDetector(
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    _showCreateRequestBottomSheet(context);
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.beige,
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: AppColors.navy.withOpacity(0.2),
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: const Icon(
-                                      Icons.edit_outlined,
-                                      color: AppColors.navy,
-                                      size: 18,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-                        Container(
-                          width: double.infinity,
-                          decoration: BoxDecoration(
-                            color: Colors.white,
-                            borderRadius: BorderRadius.circular(16),
-                            border: Border.all(
-                              color: AppColors.navy.withOpacity(0.3),
-                              width: 1,
-                            ),
-                            boxShadow: [
-                              BoxShadow(
-                                color: Colors.black.withOpacity(0.06),
-                                blurRadius: 6,
-                                offset: const Offset(0, 3),
-                              ),
-                            ],
-                          ),
-                          padding: const EdgeInsets.all(16),
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              const Text(
-                                'Awaiting Approval',
-                                style: TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontSize: 18,
-                                  fontWeight: FontWeight.w600,
-                                  color: Colors.orange,
-                                ),
-                              ),
-                              const SizedBox(height: 8),
-                              _buildOrderDetailRow(
-                                Icons.inventory_2_outlined,
-                                'Shipment Name',
-                              ),
-                              _buildOrderDetailRow(
-                                Icons.shopping_cart_outlined,
-                                'Qty: 1 Units',
-                              ),
-                              _buildOrderDetailRow(
-                                Icons.warning_amber_rounded,
-                                'Cause of damage',
-                              ),
-                              Align(
-                                alignment: Alignment.centerRight,
-                                child: GestureDetector(
-                                  onTap: () {
-                                    Navigator.pop(context);
-                                    _showCreateRequestBottomSheet(context);
-                                  },
-                                  child: Container(
-                                    padding: const EdgeInsets.all(6),
-                                    decoration: BoxDecoration(
-                                      color: AppColors.beige,
-                                      borderRadius: BorderRadius.circular(8),
-                                      border: Border.all(
-                                        color: AppColors.navy.withOpacity(0.2),
-                                        width: 1,
-                                      ),
-                                    ),
-                                    child: const Icon(
-                                      Icons.edit_outlined,
-                                      color: AppColors.navy,
-                                      size: 18,
-                                    ),
-                                  ),
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ],
-              );
-            },
-          ),
-        ),
-      ),
-    );
-  }
-
-  Widget _buildOrderDetailRow(IconData icon, String text) {
-    return Padding(
-      padding: const EdgeInsets.symmetric(vertical: 4),
-      child: Row(
-        children: [
-          Icon(icon, size: 18, color: Colors.black54),
-          const SizedBox(width: 8),
-          Text(text, style: const TextStyle(fontFamily: 'Inter', fontSize: 14)),
-        ],
-      ),
     );
   }
 }

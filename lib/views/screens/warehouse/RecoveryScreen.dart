@@ -1,9 +1,21 @@
 // lib/views/screens/warehouse/recovery_screen.dart
+//
+// شاشة "Recovery" (المرتجعات) — مربوطة بالكامل:
+//   GET /workers/tasks?category=Returns
+// تفرز النتائج تلقائياً بين "Pending" (in_preparation) و "Completed".
+//
+// ⚠️ ملاحظة: بعكس التصميم القديم، الكارد صار قابل للضغط بتبويب Pending
+// كمان (مش بس Completed) عشان يفتح تفاصيل المهمة ويقدر العامل يمسح
+// المنتجات. إذا كنتِ تقصدي فعلياً إنه ما ينفتحش إلا وهو مكتمل، قوليلي
+// ونرجعها لمنطقها القديم.
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../../controllers/order_controller.dart';
+import '../../../models/order_model.dart';
 import '../../../utils/constants.dart';
 import '../../../views/widgets/auth_widgets.dart';
-import 'order_an_details.dart';
+import 'recovery_details.dart';
 
 class RecoveryScreen extends StatefulWidget {
   const RecoveryScreen({super.key});
@@ -13,8 +25,19 @@ class RecoveryScreen extends StatefulWidget {
 }
 
 class _RecoveryScreenState extends State<RecoveryScreen> {
-  // متغير للتحكم في التبويب المختار
   bool isPendingSelected = true;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<OrderController>().fetchRecoveryTasks();
+    });
+  }
+
+  Future<void> _refresh() async {
+    await context.read<OrderController>().fetchRecoveryTasks();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -24,10 +47,8 @@ class _RecoveryScreenState extends State<RecoveryScreen> {
       backgroundColor: AppColors.beige,
       body: Column(
         children: [
-          // الهيدر
           ReceivingTopHeader(height: screenHeight * 0.22, title: 'Recovery'),
 
-          // منطقة التبويبات
           Transform.translate(
             offset: const Offset(0, -50),
             child: Column(
@@ -46,67 +67,97 @@ class _RecoveryScreenState extends State<RecoveryScreen> {
                     ),
                     child: Row(
                       children: [
-                        // زر Pending
                         Expanded(
                           child: GestureDetector(
                             onTap: () =>
                                 setState(() => isPendingSelected = true),
-                            child: _buildTabButton(
-                              'Pending',
-                              isPendingSelected,
-                            ),
+                            child: _buildTabButton('Pending', isPendingSelected),
                           ),
                         ),
-                        // زر Completed
                         Expanded(
                           child: GestureDetector(
                             onTap: () =>
                                 setState(() => isPendingSelected = false),
                             child: _buildTabButton(
-                              'Completed',
-                              !isPendingSelected,
-                            ),
+                                'Completed', !isPendingSelected),
                           ),
                         ),
                       ],
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 8),
-
-                // الخط الفاصل
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 24.0),
                   child: Divider(color: Colors.black12, thickness: 1),
                 ),
-
                 const SizedBox(height: 8),
               ],
             ),
           ),
 
-          // قائمة الكروت
           Expanded(
             child: Transform.translate(
               offset: const Offset(0, -50),
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(horizontal: 24.0),
-                itemCount: 3,
-                itemBuilder: (context, index) {
-                  return GestureDetector(
-                    onTap: () {
-                      // التعديل هنا: لا يتم الانتقال إلا إذا كنا في تبويب Completed
-                      if (!isPendingSelected) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const OrderAnDetailsScreen(),
+              child: Consumer<OrderController>(
+                builder: (context, controller, _) {
+                  if (controller.isLoadingList) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  if (controller.listError != null) {
+                    return _ErrorState(
+                      message: controller.listError!,
+                      onRetry: _refresh,
+                    );
+                  }
+
+                  final tasks = isPendingSelected
+                      ? controller.pendingTasks
+                      : controller.completedTasks;
+
+                  if (tasks.isEmpty) {
+                    return Center(
+                      child: Text(
+                        isPendingSelected
+                            ? 'No pending returns'
+                            : 'No completed returns',
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 16,
+                          color: Colors.black54,
+                        ),
+                      ),
+                    );
+                  }
+
+                  return RefreshIndicator(
+                    onRefresh: _refresh,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24.0,
+                        vertical: 0,
+                      ),
+                      itemCount: tasks.length,
+                      itemBuilder: (context, index) {
+                        final task = tasks[index];
+                        return GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    RecoveryDetailsScreen(taskId: task.id),
+                              ),
+                            ).then((_) => _refresh());
+                          },
+                          child: _TaskCard(
+                            task: task,
+                            showPendingBadge: isPendingSelected,
                           ),
                         );
-                      }
-                    },
-                    child: _RecoveryCard(showDueTime: isPendingSelected),
+                      },
+                    ),
                   );
                 },
               ),
@@ -117,7 +168,6 @@ class _RecoveryScreenState extends State<RecoveryScreen> {
     );
   }
 
-  // مساعد لبناء تصميم زر التبويب
   Widget _buildTabButton(String title, bool isSelected) {
     return Container(
       decoration: BoxDecoration(
@@ -132,9 +182,8 @@ class _RecoveryScreenState extends State<RecoveryScreen> {
           fontSize: 18,
           fontWeight: FontWeight.w600,
           color: AppColors.navy,
-          decoration: isSelected
-              ? TextDecoration.underline
-              : TextDecoration.none,
+          decoration:
+              isSelected ? TextDecoration.underline : TextDecoration.none,
           decorationColor: AppColors.navy,
           decorationThickness: 1.5,
         ),
@@ -143,10 +192,48 @@ class _RecoveryScreenState extends State<RecoveryScreen> {
   }
 }
 
-// كرت شحنة الاسترداد
-class _RecoveryCard extends StatelessWidget {
-  final bool showDueTime;
-  const _RecoveryCard({required this.showDueTime});
+class _ErrorState extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _ErrorState({required this.message, required this.onRetry});
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.redAccent, size: 40),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontFamily: 'Inter', fontSize: 15),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// كرت المهمة - مستقل لشاشة Recovery
+// ============================================================
+class _TaskCard extends StatelessWidget {
+  final WorkerTask task;
+  final bool showPendingBadge;
+
+  const _TaskCard({required this.task, required this.showPendingBadge});
+
+  String _formatDate(DateTime? date) {
+    if (date == null) return '-';
+    return '${date.day}/${date.month}/${date.year}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -169,42 +256,49 @@ class _RecoveryCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Order # 88',
-            style: TextStyle(
+          Text(
+            task.displayTitle,
+            style: const TextStyle(
               fontFamily: 'Inter',
               fontSize: 26,
               fontWeight: FontWeight.w500,
+              color: Colors.black,
             ),
           ),
           const SizedBox(height: 2),
-          const Text(
-            'customer name',
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 15,
-              color: Colors.black87,
+          if (task.relatedStatus != null)
+            Text(
+              task.relatedStatus!,
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 15,
+                fontWeight: FontWeight.w400,
+                color: Colors.black87,
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              const Text(
-                'Items: 4',
-                style: TextStyle(
+              Text(
+                'Created: ${_formatDate(task.createdAt)}',
+                style: const TextStyle(
                   fontFamily: 'Inter',
-                  fontSize: 15,
-                  color: Colors.black87,
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  color: Colors.black54,
                 ),
               ),
               Text(
-                showDueTime ? 'Due: 2 hours' : '13/2/2026',
+                showPendingBadge ? 'In preparation' : 'Completed',
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 15,
                   fontWeight: FontWeight.w500,
-                  color: AppColors.greenLight,
+                  color: showPendingBadge
+                      ? AppColors.orange
+                      : AppColors.greenLight,
                 ),
               ),
             ],

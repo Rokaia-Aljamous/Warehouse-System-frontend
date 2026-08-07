@@ -1,7 +1,16 @@
+// lib/views/screens/warehouse/ReceivingScreen.dart
+//
+// شاشة "Receiving" (استلام الشحنات) — مربوطة بالكامل:
+//   GET /workers/tasks?category=Receiving a shipment
+// تفرز النتائج تلقائياً بين "Pending" (in_preparation) و "Completed".
+
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import '../../../controllers/order_controller.dart';
+import '../../../models/order_model.dart';
 import '../../../utils/constants.dart';
 import '../../../views/widgets/auth_widgets.dart';
-import 'order_details.dart'; // استيراد شاشة تفاصيل الطلب
+import 'receiving_details.dart';
 
 class ReceivingScreen extends StatefulWidget {
   const ReceivingScreen({super.key});
@@ -14,6 +23,18 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
   bool isPendingSelected = true;
 
   @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<OrderController>().fetchReceivingTasks();
+    });
+  }
+
+  Future<void> _refresh() async {
+    await context.read<OrderController>().fetchReceivingTasks();
+  }
+
+  @override
   Widget build(BuildContext context) {
     final screenHeight = MediaQuery.of(context).size.height;
 
@@ -21,16 +42,12 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
       backgroundColor: AppColors.beige,
       body: Column(
         children: [
-          // ============================================================
-          // 1. الهيدر - استدعاء الميلان المشترك
-          // ============================================================
           ReceivingTopHeader(height: screenHeight * 0.22, title: 'Receiving'),
 
           Transform.translate(
             offset: const Offset(0, -50),
             child: Column(
               children: [
-                // التبويب (Tabs)
                 Padding(
                   padding: const EdgeInsets.symmetric(horizontal: 24.0),
                   child: Container(
@@ -45,11 +62,9 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
                     ),
                     child: Row(
                       children: [
-                        // تبويب Pending
                         Expanded(
                           child: GestureDetector(
-                            onTap: () =>
-                                setState(() => isPendingSelected = true),
+                            onTap: () => setState(() => isPendingSelected = true),
                             child: Container(
                               decoration: BoxDecoration(
                                 color: isPendingSelected
@@ -75,11 +90,9 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
                             ),
                           ),
                         ),
-                        // تبويب Completed
                         Expanded(
                           child: GestureDetector(
-                            onTap: () =>
-                                setState(() => isPendingSelected = false),
+                            onTap: () => setState(() => isPendingSelected = false),
                             child: Container(
                               decoration: BoxDecoration(
                                 color: !isPendingSelected
@@ -109,47 +122,77 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
                     ),
                   ),
                 ),
-
                 const SizedBox(height: 8),
-
-                // الخط الفاصل
                 const Padding(
                   padding: EdgeInsets.symmetric(horizontal: 24.0),
                   child: Divider(color: Colors.black12, thickness: 1),
                 ),
-
                 const SizedBox(height: 8),
               ],
             ),
           ),
 
-          // الكروت (Cards List)
           Expanded(
             child: Transform.translate(
               offset: const Offset(0, -50),
-              child: ListView.builder(
-                padding: const EdgeInsets.symmetric(
-                  horizontal: 24.0,
-                  vertical: 0,
-                ),
-                itemCount: 2,
-                itemBuilder: (context, index) {
-                  return GestureDetector(
-                    onTap: () {
-                      // ينتقل لصفحة التفاصيل عند الضغط إذا كنا في تبويب Completed
-                      if (!isPendingSelected) {
-                        Navigator.push(
-                          context,
-                          MaterialPageRoute(
-                            builder: (context) => const OrderDetailsScreen(),
+              child: Consumer<OrderController>(
+                builder: (context, controller, _) {
+                  if (controller.isLoadingList) {
+                    return const Center(child: CircularProgressIndicator());
+                  }
+
+                  if (controller.listError != null) {
+                    return _ErrorState(
+                      message: controller.listError!,
+                      onRetry: _refresh,
+                    );
+                  }
+
+                  final tasks = isPendingSelected
+                      ? controller.pendingTasks
+                      : controller.completedTasks;
+
+                  if (tasks.isEmpty) {
+                    return Center(
+                      child: Text(
+                        isPendingSelected
+                            ? 'No pending tasks'
+                            : 'No completed tasks',
+                        style: const TextStyle(
+                          fontFamily: 'Inter',
+                          fontSize: 16,
+                          color: Colors.black54,
+                        ),
+                      ),
+                    );
+                  }
+
+                  return RefreshIndicator(
+                    onRefresh: _refresh,
+                    child: ListView.builder(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 24.0,
+                        vertical: 0,
+                      ),
+                      itemCount: tasks.length,
+                      itemBuilder: (context, index) {
+                        final task = tasks[index];
+                        return GestureDetector(
+                          onTap: () {
+                            Navigator.push(
+                              context,
+                              MaterialPageRoute(
+                                builder: (context) =>
+                                    ReceivingDetailsScreen(taskId: task.id),
+                              ),
+                            ).then((_) => _refresh());
+                          },
+                          child: _TaskCard(
+                            task: task,
+                            showPendingBadge: isPendingSelected,
                           ),
                         );
-                      }
-                    },
-                    child: _OrderCard(
-                      showDueTime: isPendingSelected,
-                      dateText:
-                          '13/2/2026', // نمرر التاريخ الافتراضي هنا لقراءة كرت الـ Completed
+                      },
                     ),
                   );
                 },
@@ -162,11 +205,48 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
   }
 }
 
-class _OrderCard extends StatelessWidget {
-  final bool showDueTime;
-  final String dateText;
+class _ErrorState extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+  const _ErrorState({required this.message, required this.onRetry});
 
-  const _OrderCard({required this.showDueTime, required this.dateText});
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 32),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.redAccent, size: 40),
+            const SizedBox(height: 12),
+            Text(
+              message,
+              textAlign: TextAlign.center,
+              style: const TextStyle(fontFamily: 'Inter', fontSize: 15),
+            ),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+// ============================================================
+// كرت المهمة - مستقل لشاشة Receiving
+// ============================================================
+class _TaskCard extends StatelessWidget {
+  final WorkerTask task;
+  final bool showPendingBadge;
+
+  const _TaskCard({required this.task, required this.showPendingBadge});
+
+  String _formatDate(DateTime? date) {
+    if (date == null) return '-';
+    return '${date.day}/${date.month}/${date.year}';
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -189,9 +269,9 @@ class _OrderCard extends StatelessWidget {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          const Text(
-            'Order # 88',
-            style: TextStyle(
+          Text(
+            task.displayTitle,
+            style: const TextStyle(
               fontFamily: 'Inter',
               fontSize: 26,
               fontWeight: FontWeight.w500,
@@ -199,51 +279,41 @@ class _OrderCard extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 2),
-          const Text(
-            'customer name',
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 15,
-              fontWeight: FontWeight.w400,
-              color: Colors.black87,
+          if (task.relatedStatus != null)
+            Text(
+              task.relatedStatus!,
+              style: const TextStyle(
+                fontFamily: 'Inter',
+                fontSize: 15,
+                fontWeight: FontWeight.w400,
+                color: Colors.black87,
+              ),
             ),
-          ),
-          const SizedBox(height: 2),
+          const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
-            crossAxisAlignment: CrossAxisAlignment
-                .end, // لضمان محاذاة العناصر من الأسفل بالتساوي
+            crossAxisAlignment: CrossAxisAlignment.end,
             children: [
-              const Text(
-                'Items: 4',
+              Text(
+                'Created: ${_formatDate(task.createdAt)}',
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 14,
+                  fontWeight: FontWeight.w400,
+                  color: Colors.black54,
+                ),
+              ),
+              Text(
+                showPendingBadge ? 'In preparation' : 'Completed',
                 style: TextStyle(
                   fontFamily: 'Inter',
                   fontSize: 15,
-                  fontWeight: FontWeight.w400,
-                  color: Colors.black87,
+                  fontWeight: FontWeight.w500,
+                  color: showPendingBadge
+                      ? AppColors.orange
+                      : AppColors.greenLight,
                 ),
               ),
-              // شرط العرض: إذا كان Pending يعرض Due، وإذا كان Completed يعرض التاريخ الأخضر
-              showDueTime
-                  ? Text(
-                      'Due: 3 hours',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors.greenLight,
-                      ),
-                    )
-                  : Text(
-                      dateText,
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                        color: AppColors
-                            .greenLight, // استخدام نفس لون الثيم الأخضر المعتمد لديكِ
-                      ),
-                    ),
             ],
           ),
         ],

@@ -1,6 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:stock_app/providers/auth_provider.dart';
+import 'package:stock_app/controllers/order_controller.dart';
+import 'package:stock_app/controllers/destruction_controller.dart';
 import 'package:stock_app/views/screens/common/login_screen.dart';
 // تأكدي أن المسارات أدناه تطابق مجلدات مشروعكِ الحالية
 import 'utils/constants.dart';
@@ -10,10 +12,15 @@ void main() {
   // 👈 خطوة أمان أساسية لتهيئة خدمات فلاتر قبل إقلاع التطبيق ومنع أي كراش بالثيم والخطوط
   WidgetsFlutterBinding.ensureInitialized();
 
-  // ---- منطق المصادقة مأخوذ من المشروع الأول ----
+  // ---- منطق المصادقة مأخوذ من المشروع الأول (لم يتم لمسه) ----
+  // ---- OrderController أُضيف هون فقط لتفعيل ربط شاشات المهام بالباك إند ----
   runApp(
-    ChangeNotifierProvider(
-      create: (_) => AuthProvider()..initialize(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => AuthProvider()..initialize()),
+        ChangeNotifierProvider(create: (_) => OrderController()),
+        ChangeNotifierProvider(create: (_) => DestructionController()),
+      ],
       child: const MyApp(),
     ),
   );

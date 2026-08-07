@@ -3,7 +3,6 @@
 import 'package:flutter/material.dart';
 import '../../../utils/constants.dart';
 import 'my_orders.dart';
-import 'archive_screen.dart';
 
 class DestructionScreen extends StatelessWidget {
   const DestructionScreen({super.key});
@@ -81,11 +80,11 @@ class DestructionScreen extends StatelessWidget {
                               ),
                               const SizedBox(width: 20),
                               // ============================================================
-                              // صندوق my orders - يروح على تبويب My Order (index 2)
+                              // صندوق Request List - يروح على تبويب Request List (index 2)
                               // ============================================================
                               Expanded(
                                 child: _buildFigmaBox(
-                                  title: 'my orders',
+                                  title: 'Request List',
                                   onTap: () {
                                     Navigator.push(
                                       context,
@@ -176,57 +175,6 @@ class DestructionScreen extends StatelessWidget {
             ],
           ),
         ),
-      ),
-    );
-  }
-}
-
-class ArchiveScreen extends StatelessWidget {
-  const ArchiveScreen({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return Scaffold(
-      backgroundColor: AppColors.beige,
-      body: Column(
-        children: [
-          Container(
-            width: double.infinity,
-            color: AppColors.navy,
-            padding: EdgeInsets.only(
-              top: MediaQuery.of(context).padding.top + 10,
-              left: 8,
-              right: 8,
-              bottom: 20,
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                IconButton(
-                  icon: const Icon(
-                    Icons.arrow_back,
-                    color: Colors.white,
-                    size: 24,
-                  ),
-                  onPressed: () => Navigator.pop(context),
-                ),
-                const Padding(
-                  padding: EdgeInsets.only(left: 16.0),
-                  child: Text(
-                    'Archived',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 32,
-                      fontWeight: FontWeight.bold,
-                      color: Colors.white,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-          const Expanded(child: ArchiveTabContent()),
-        ],
       ),
     );
   }
