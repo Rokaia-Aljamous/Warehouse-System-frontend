@@ -4,7 +4,7 @@ class Api {
   // - على جهاز حقيقي أو iOS Simulator: استخدمي الـ IP المحلي لجهاز الكمبيوتر (مثلاً 192.168.1.x)
   // - لو السيرفر أونلاين: حطي الدومين الحقيقي
   // عدّلي هذا السطر:
-  static const String baseUrl = "http://10.150.80.34:8001";
+  static const String baseUrl = "http://192.168.1.7:8001";
 
   static const String login = "/api/workers/login";
   static const String forgotPassword = "/api/workers/password/forgot";

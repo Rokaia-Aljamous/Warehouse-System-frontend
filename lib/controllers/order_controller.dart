@@ -4,12 +4,50 @@
 // يُغلّف TaskService ويُعرف الواجهات على حالة المهام فقط (لا تتعامل
 // الواجهات مع Dio مباشرة) — نفس فلسفة AuthProvider بالضبط.
 
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:stock_app/models/order_model.dart';
 import 'package:stock_app/services/task_service.dart';
+import 'package:stock_app/services/local_storage_service.dart';
+import 'package:stock_app/services/connectivity_service.dart';
+import 'package:stock_app/services/sync_service.dart';
 
 class OrderController extends ChangeNotifier {
   final TaskService _taskService = TaskService();
+  final LocalStorageService _localStorage = LocalStorageService();
+  final SyncService _syncService = SyncService();
+  StreamSubscription<bool>? _connectivitySub;
+
+  // ---- حالة "بلا نت" (خاصة بمهام التحضير فقط حالياً) ----
+  bool isDetailsFromCache = false;
+  bool isListFromCache = false;
+  String? _lastFetchedCategory;
+
+  OrderController() {
+    // لما يرجع النت: بنبعت كل العمليات المعلّقة، وبعدين بنحدّث الشاشة
+    // المفتوحة حالياً (تفاصيل مهمة أو قائمة) عشان "يكمل شغلو طبيعي"
+    _connectivitySub = ConnectivityService().onStatusChange.listen((isOnline) {
+      if (isOnline) _onReconnected();
+    });
+  }
+
+  Future<void> _onReconnected() async {
+    await _syncService.syncPendingOperations();
+
+    if (currentTask != null) {
+      await fetchTaskDetails(currentTask!.task.id);
+    }
+    if (_lastFetchedCategory != null) {
+      await _fetchTasksByCategory(_lastFetchedCategory!);
+    }
+  }
+
+  @override
+  void dispose() {
+    _connectivitySub?.cancel();
+    super.dispose();
+  }
 
   // ---- قائمة المهام (PreparingScreen / ReceivingScreen) ----
   bool isLoadingList = false;
@@ -60,6 +98,7 @@ class OrderController extends ChangeNotifier {
   // دالة عامة مشتركة يستخدمها Processing و Receiving و Recovery و Destruction
   // بدل تكرار نفس الكود بكل مرة
   Future<void> _fetchTasksByCategory(String category) async {
+    _lastFetchedCategory = category;
     isLoadingList = true;
     listError = null;
     notifyListeners();
@@ -73,12 +112,56 @@ class OrderController extends ChangeNotifier {
       final parsed = WorkerTasksResponse.fromJson(data);
       pendingTasks = parsed.inPreparation;
       completedTasks = parsed.completed;
+      isListFromCache = false;
       notifyListeners();
+      // نخزن نسخة محلية عشان تكون جاهزة لو انقطع النت
+      unawaited(_localStorage.saveTasks(category, data));
       return;
+    }
+
+    // statusCode == null يعني فشل شبكة فعلي (بلا نت)، مش رفض من السيرفر
+    final isNetworkFailure = result['statusCode'] == null;
+
+    if (isNetworkFailure) {
+      final cached = await _localStorage.getTasks(category);
+      if (cached != null) {
+        final parsed = WorkerTasksResponse.fromJson(cached);
+        pendingTasks = List.of(parsed.inPreparation);
+        completedTasks = List.of(parsed.completed);
+
+        // أي مهمة اتأكدت محلياً (أوفلاين) ولسا ما انزامنت، نرحّلها
+        // لتبويب "Completed" حتى لو الكاش الأصلي لسا حاطها Pending
+        final locallyCompletedIds = await _localCompletedTaskIds();
+        if (locallyCompletedIds.isNotEmpty) {
+          final movedOut = <WorkerTask>[];
+          pendingTasks.removeWhere((t) {
+            if (locallyCompletedIds.contains(t.id)) {
+              movedOut.add(t);
+              return true;
+            }
+            return false;
+          });
+          completedTasks.addAll(movedOut);
+        }
+
+        isListFromCache = true;
+        listError = null;
+        notifyListeners();
+        return;
+      }
     }
 
     listError = result['message']?.toString() ?? 'Failed to load tasks';
     notifyListeners();
+  }
+
+  // مجموعة الـ taskId يلي انأكدو محلياً (أوفلاين) ولسا بطابور المزامنة
+  Future<Set<int>> _localCompletedTaskIds() async {
+    final ops = await _localStorage.getPendingOperations(status: 'pending');
+    return ops
+        .where((op) => op['type'] == 'complete' && op['task_id'] != null)
+        .map((op) => op['task_id'] as int)
+        .toSet();
   }
 
   // ============================================================
@@ -96,13 +179,66 @@ class OrderController extends ChangeNotifier {
     if (result['success'] == true) {
       final data = result['data'] as Map<String, dynamic>;
       currentTask = TaskDetail.fromJson(data);
+      isDetailsFromCache = false;
       detailsError = null;
+      await _applyPendingScansToCurrentTask(taskId);
       notifyListeners();
+      unawaited(_localStorage.saveTaskDetails(taskId, data));
       return true;
+    }
+
+    final isNetworkFailure = result['statusCode'] == null;
+
+    if (isNetworkFailure) {
+      final cached = await _localStorage.getTaskDetails(taskId);
+      if (cached != null) {
+        currentTask = TaskDetail.fromJson(cached);
+        isDetailsFromCache = true;
+        detailsError = null;
+        await _applyPendingScansToCurrentTask(taskId);
+        notifyListeners();
+        return true;
+      }
     }
 
     detailsError = result['message']?.toString() ?? 'Failed to load task';
     notifyListeners();
+    return false;
+  }
+
+  // يطبّق أي عمليات مسح (scan) محفوظة بطابور المزامنة لهاد الـ taskId
+  // فوق currentTask.items، عشان الشاشة تعرض دايماً آخر حالة حقيقية
+  // حتى لو السيرفر لسا ما بيعرف فيها (لسا ما انبعتت).
+  Future<void> _applyPendingScansToCurrentTask(int taskId) async {
+    if (currentTask == null) return;
+
+    final ops = await _localStorage.getPendingOperations(status: 'pending');
+    final pendingScans = ops.where(
+      (op) => op['type'] == 'scan' && op['task_id'] == taskId,
+    );
+
+    for (final op in pendingScans) {
+      final barcode = (op['payload'] as Map)['barcode']?.toString();
+      if (barcode == null) continue;
+      _incrementItemByBarcode(barcode);
+    }
+  }
+
+  // يزيد pickedQty لمنتج واحد بمقدار قطعة (نفس منطق السيرفر: كل مسحة = قطعة)
+  // بيرجع true إذا لقى تطابق فعلي وقدر يزيد، false إذا ما لقى أو المنتج مكتمل أصلاً
+  bool _incrementItemByBarcode(String barcode) {
+    if (currentTask == null) return false;
+    final normalized = barcode.trim().toLowerCase();
+
+    for (final item in currentTask!.items) {
+      final itemBarcode = item.barcode?.trim().toLowerCase();
+      if (itemBarcode != null && itemBarcode == normalized) {
+        if (item.pickedQty < item.expectedQty) {
+          item.pickedQty += 1;
+        }
+        return true;
+      }
+    }
     return false;
   }
 
@@ -116,6 +252,10 @@ class OrderController extends ChangeNotifier {
     final result = await _taskService.scanBarcode(taskId, barcode);
 
     if (result['success'] != true) {
+      final isNetworkFailure = result['statusCode'] == null;
+      if (isNetworkFailure) {
+        return _scanBarcodeOffline(taskId, barcode);
+      }
       scanError = result['message']?.toString() ?? 'Failed to scan barcode';
       notifyListeners();
       return ScanOutcome.error;
@@ -149,6 +289,52 @@ class OrderController extends ChangeNotifier {
   }
 
   // ============================================================
+  // 3-ب) مسح باركود أوفلاين — مطابقة محلية على currentTask.items
+  // (متوفرة أصلاً لأن الباركود بيجي مع تفاصيل المهمة)، ثم تسجيل
+  // العملية بطابور المزامنة لحد ما يرجع النت.
+  // ============================================================
+  Future<ScanOutcome> _scanBarcodeOffline(int taskId, String barcode) async {
+    if (currentTask == null) {
+      scanError = 'No internet connection';
+      notifyListeners();
+      return ScanOutcome.error;
+    }
+
+    final normalized = barcode.trim().toLowerCase();
+    TaskOrderItem? matchedItem;
+    for (final item in currentTask!.items) {
+      if (item.barcode?.trim().toLowerCase() == normalized) {
+        matchedItem = item;
+        break;
+      }
+    }
+
+    if (matchedItem == null) {
+      scanError = 'Product not found for this barcode';
+      notifyListeners();
+      return ScanOutcome.notMatched;
+    }
+
+    if (matchedItem.pickedQty >= matchedItem.expectedQty) {
+      scanError = 'This item is already fully scanned';
+      notifyListeners();
+      return ScanOutcome.success;
+    }
+
+    matchedItem.pickedQty += 1;
+    scanError = null;
+    notifyListeners();
+
+    await _localStorage.addPendingOperation(
+      type: 'scan',
+      taskId: taskId,
+      payload: {'barcode': barcode},
+    );
+
+    return ScanOutcome.success;
+  }
+
+  // ============================================================
   // 4) تأكيد إكمال المهمة
   // ============================================================
   Future<bool> completeTask(int taskId) async {
@@ -167,6 +353,11 @@ class OrderController extends ChangeNotifier {
       return true;
     }
 
+    final isNetworkFailure = result['statusCode'] == null;
+    if (isNetworkFailure) {
+      return _completeTaskOffline(taskId);
+    }
+
     final data = result['data'];
     if (data is Map && data['remaining_items'] is List) {
       remainingItems = (data['remaining_items'] as List)
@@ -178,6 +369,55 @@ class OrderController extends ChangeNotifier {
     completeError = result['message']?.toString() ?? 'Failed to complete task';
     notifyListeners();
     return false;
+  }
+
+  // ============================================================
+  // 4-ب) إكمال المهمة أوفلاين — نتحقق محلياً إنه كل العناصر مكتملة
+  // (نفس منطق task.allItemsComplete المستخدم أصلاً بالـ UI)، وإذا
+  // تمام نسجل عملية "complete" بالطابور لحد ما يرجع النت.
+  // ============================================================
+  Future<bool> _completeTaskOffline(int taskId) async {
+    if (currentTask == null) {
+      completeError = 'No internet connection';
+      notifyListeners();
+      return false;
+    }
+
+    if (!currentTask!.allItemsComplete) {
+      remainingItems = currentTask!.items
+          .where((i) => !i.isComplete)
+          .map(
+            (i) => RemainingItem(
+              productId: i.productId,
+              product: i.productName,
+              expected: i.expectedQty,
+              scanned: i.pickedQty,
+              remaining: i.remaining,
+            ),
+          )
+          .toList();
+      completeError = null;
+      notifyListeners();
+      return false;
+    }
+
+    // تجنّب تكرار تسجيل نفس عملية الإكمال أكتر من مرة
+    final existingOps = await _localStorage.getPendingOperations(status: 'pending');
+    final alreadyQueued = existingOps.any(
+      (op) => op['type'] == 'complete' && op['task_id'] == taskId,
+    );
+
+    if (!alreadyQueued) {
+      await _localStorage.addPendingOperation(
+        type: 'complete',
+        taskId: taskId,
+        payload: {},
+      );
+    }
+
+    completeError = null;
+    notifyListeners();
+    return true;
   }
 
   // ============================================================

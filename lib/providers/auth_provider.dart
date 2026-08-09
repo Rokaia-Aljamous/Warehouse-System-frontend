@@ -3,12 +3,15 @@
 // مزود الحالة (State Management) لكل ما يخص الـ Authentication.
 // يُغلّف AuthService ويُعرف الواجهات على حالة الـ Auth فقط (لا تتعامل الواجهات مع Dio مباشرة).
 
+import 'dart:async';
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'package:stock_app/services/auth_service.dart';
+import 'package:stock_app/services/local_storage_service.dart';
 
 class AuthProvider extends ChangeNotifier {
   final AuthService _authService = AuthService();
+  final LocalStorageService _localStorage = LocalStorageService();
 
   // ---- الحالة العامة ----
   bool isLoading = false;
@@ -27,6 +30,7 @@ class AuthProvider extends ChangeNotifier {
   String? profileImageUrl;
   String? profileRole;
   int? profileWarehouseId;
+  bool profileIsFromCache = false;
 
   // ============================================================
   // 1) تهيئة التطبيق عند الفتح — يسترجع الجلسة المحفوظة
@@ -81,6 +85,7 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     await _authService.logout();
+    await _localStorage.clearAll();
 
     isLoading = false;
     isAuthenticated = false;
@@ -94,6 +99,7 @@ class AuthProvider extends ChangeNotifier {
     profileImageUrl = null;
     profileRole = null;
     profileWarehouseId = null;
+    profileIsFromCache = false;
     notifyListeners();
   }
 
@@ -294,19 +300,42 @@ class AuthProvider extends ChangeNotifier {
 
     if (result['success'] == true) {
       final data = result['data'] as Map<String, dynamic>;
-      profileFullName = data['full_name']?.toString();
-      profileBirthday = data['birthday']?.toString();
-      profilePhoneNumber = data['phone_number']?.toString();
-      profileUserName = data['user_name']?.toString();
-      profileImageUrl = data['profile_image']?.toString();
-      profileRole = data['role']?.toString();
-      profileWarehouseId = (data['warehouse_id'] as num?)?.toInt();
+      _applyProfileJson(data);
+      profileIsFromCache = false;
+      errorMessage = null;
       notifyListeners();
+      // نخزن النسخة الناجحة محلياً عشان تكون جاهزة لو انقطع النت لاحقاً
+      unawaited(_localStorage.saveProfile(data));
       return;
+    }
+
+    // statusCode == null يعني فشل على مستوى الشبكة (SocketException/Timeout)
+    // مش رفض من السيرفر (401/403...) — بهاي الحالة فقط نرجع للكاش.
+    final isNetworkFailure = result['statusCode'] == null;
+
+    if (isNetworkFailure) {
+      final cached = await _localStorage.getProfile();
+      if (cached != null) {
+        _applyProfileJson(cached);
+        profileIsFromCache = true;
+        errorMessage = null;
+        notifyListeners();
+        return;
+      }
     }
 
     errorMessage = result['message']?.toString() ?? 'Failed to load profile';
     notifyListeners();
+  }
+
+  void _applyProfileJson(Map<String, dynamic> data) {
+    profileFullName = data['full_name']?.toString();
+    profileBirthday = data['birthday']?.toString();
+    profilePhoneNumber = data['phone_number']?.toString();
+    profileUserName = data['user_name']?.toString();
+    profileImageUrl = data['profile_image']?.toString();
+    profileRole = data['role']?.toString();
+    profileWarehouseId = (data['warehouse_id'] as num?)?.toInt();
   }
 
   // ============================================================
