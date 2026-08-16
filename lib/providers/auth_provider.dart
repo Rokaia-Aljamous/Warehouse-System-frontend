@@ -327,7 +327,7 @@ class AuthProvider extends ChangeNotifier {
       await _applyPendingProfileEditIfAny();
       notifyListeners();
       // نخزن النسخة الناجحة محلياً عشان تكون جاهزة لو انقطع النت لاحقاً
-      unawaited(_localStorage.saveProfile(data));
+      await _localStorage.saveProfile(data);
       return;
     }
 

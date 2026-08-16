@@ -82,7 +82,7 @@ class DestructionController extends ChangeNotifier {
       notifyListeners();
       // نخزن نسخة محلية عشان تكون جاهزة لو انقطع النت (نفس نمط
       // OrderController._fetchTasksByCategory مع cached_tasks)
-      unawaited(_localStorage.saveDisposals(result['data']));
+      await _localStorage.saveDisposals(result['data']);
       return;
     }
 
@@ -152,7 +152,7 @@ class DestructionController extends ChangeNotifier {
       isDetailsFromCache = false;
       notifyListeners();
       // نخزن نسخة محلية لهاد الطلب بالذات عشان تنفتح أوفلاين لاحقاً
-      unawaited(_localStorage.saveDisposalDetails(id, body));
+      await _localStorage.saveDisposalDetails(id, body);
       return true;
     }
 

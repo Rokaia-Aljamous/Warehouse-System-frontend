@@ -166,7 +166,7 @@ class OrderController extends ChangeNotifier {
       isListFromCache = false;
       notifyListeners();
       // نخزن نسخة محلية عشان تكون جاهزة لو انقطع النت
-      unawaited(_localStorage.saveTasks(category, data));
+      await _localStorage.saveTasks(category, data);
       return;
     }
 
@@ -229,7 +229,7 @@ class OrderController extends ChangeNotifier {
       allCompletedTasks = parsed.completed;
       isAllTasksFromCache = false;
       notifyListeners();
-      unawaited(_localStorage.saveTasks(_allTasksCacheKey, data));
+      await _localStorage.saveTasks(_allTasksCacheKey, data);
       return;
     }
 
@@ -294,7 +294,7 @@ class OrderController extends ChangeNotifier {
       detailsError = null;
       await _applyPendingScansToCurrentTask(taskId);
       notifyListeners();
-      unawaited(_localStorage.saveTaskDetails(taskId, data));
+      await _localStorage.saveTaskDetails(taskId, data);
       return true;
     }
 
@@ -342,7 +342,7 @@ class OrderController extends ChangeNotifier {
       detailsError = null;
       await _applyPendingScansToCurrentTask(taskId);
       notifyListeners();
-      unawaited(_localStorage.saveTaskDetails(taskId, data));
+      await _localStorage.saveTaskDetails(taskId, data);
       return true;
     }
 
@@ -393,7 +393,7 @@ class OrderController extends ChangeNotifier {
       detailsError = null;
       await _applyPendingScansToCurrentTask(taskId);
       notifyListeners();
-      unawaited(_localStorage.saveTaskDetails(taskId, data));
+      await _localStorage.saveTaskDetails(taskId, data);
       return true;
     }
 
@@ -444,7 +444,7 @@ class OrderController extends ChangeNotifier {
       detailsError = null;
       await _applyPendingScansToCurrentTask(taskId);
       notifyListeners();
-      unawaited(_localStorage.saveTaskDetails(taskId, data));
+      await _localStorage.saveTaskDetails(taskId, data);
       return true;
     }
 
