@@ -105,6 +105,78 @@ class TaskService {
   }
 
   // ============================================================
+  // تفاصيل مهمة "تحضير طلب" — GET /workers/orders/{orderId}
+  // ملاحظة: هاد الـ endpoint يستخدم Order ID (task.related_id) مش Task ID.
+  // ============================================================
+  Future<Map<String, dynamic>> getOrderDetails(int orderId) async {
+    try {
+      final response = await _dio.get(Api.orderDetails(orderId));
+
+      final body = response.data is Map<String, dynamic>
+          ? response.data as Map<String, dynamic>
+          : Map<String, dynamic>.from(response.data ?? {});
+
+      return {'success': true, 'statusCode': response.statusCode, 'data': body};
+    } on DioException catch (e) {
+      return _handleDioError(e, fallback: 'Failed to load order details');
+    } on SocketException {
+      return {'success': false, 'message': 'No internet connection'};
+    } on TimeoutException {
+      return {'success': false, 'message': 'Request timed out. Please try again.'};
+    } on Exception catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  // ============================================================
+  // تفاصيل مهمة "استلام شحنة" — GET /workers/shipments/{shipmentId}
+  // ملاحظة: هاد الـ endpoint يستخدم Shipment ID (task.related_id) مش Task ID.
+  // ============================================================
+  Future<Map<String, dynamic>> getShipmentDetails(int shipmentId) async {
+    try {
+      final response = await _dio.get(Api.shipmentDetails(shipmentId));
+
+      final body = response.data is Map<String, dynamic>
+          ? response.data as Map<String, dynamic>
+          : Map<String, dynamic>.from(response.data ?? {});
+
+      return {'success': true, 'statusCode': response.statusCode, 'data': body};
+    } on DioException catch (e) {
+      return _handleDioError(e, fallback: 'Failed to load shipment details');
+    } on SocketException {
+      return {'success': false, 'message': 'No internet connection'};
+    } on TimeoutException {
+      return {'success': false, 'message': 'Request timed out. Please try again.'};
+    } on Exception catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  // ============================================================
+  // تفاصيل مهمة "مرتجع" — GET /workers/returns/{returnId}
+  // ملاحظة: هاد الـ endpoint يستخدم Return ID (task.related_id) مش Task ID.
+  // ============================================================
+  Future<Map<String, dynamic>> getReturnDetails(int returnId) async {
+    try {
+      final response = await _dio.get(Api.returnDetails(returnId));
+
+      final body = response.data is Map<String, dynamic>
+          ? response.data as Map<String, dynamic>
+          : Map<String, dynamic>.from(response.data ?? {});
+
+      return {'success': true, 'statusCode': response.statusCode, 'data': body};
+    } on DioException catch (e) {
+      return _handleDioError(e, fallback: 'Failed to load return details');
+    } on SocketException {
+      return {'success': false, 'message': 'No internet connection'};
+    } on TimeoutException {
+      return {'success': false, 'message': 'Request timed out. Please try again.'};
+    } on Exception catch (e) {
+      return {'success': false, 'message': e.toString()};
+    }
+  }
+
+  // ============================================================
   // مسح باركود ضمن مهمة — POST /workers/tasks/{taskId}/scan
   // ملاحظة: كل استدعاء = مسحة وحدة واحدة (الباك ما بيدعم quantity).
   // لمسح أكثر من قطعة لنفس المنتج، بننادي هاد الدالة أكثر من مرة.

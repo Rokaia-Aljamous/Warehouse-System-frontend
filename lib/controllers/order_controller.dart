@@ -24,22 +24,60 @@ class OrderController extends ChangeNotifier {
   bool isListFromCache = false;
   String? _lastFetchedCategory;
 
+  // إذا كانت شاشة التفاصيل المفتوحة حاليًا هي "Order preparation" (تجيب
+  // بياناتها من /workers/orders/{orderId} وليس /workers/tasks/{taskId})،
+  // نخزّن الـ orderId هون عشان إعادة الجلب بعد رجوع النت (_onReconnected).
+  int? _currentOrderId;
+
+  // نفس المبدأ بالظبط لكن لمهمة "استلام شحنة" (تجيب بياناتها من
+  // /workers/shipments/{shipmentId} وليس /workers/tasks/{taskId}).
+  int? _currentShipmentId;
+
+  // نفس المبدأ بالظبط لكن لمهمة "مرتجع" (تجيب بياناتها من
+  // /workers/returns/{returnId} وليس /workers/tasks/{taskId}).
+  int? _currentReturnId;
+
   OrderController() {
     // لما يرجع النت: بنبعت كل العمليات المعلّقة، وبعدين بنحدّث الشاشة
     // المفتوحة حالياً (تفاصيل مهمة أو قائمة) عشان "يكمل شغلو طبيعي"
     _connectivitySub = ConnectivityService().onStatusChange.listen((isOnline) {
       if (isOnline) _onReconnected();
     });
+
+    // مزامنة عند إقلاع التطبيق: onStatusChange بيبث بس عند *تغيّر* حالة
+    // النت أثناء الجلسة الحالية. لو التطبيق انفتح وهو أونلاين من البداية
+    // (بدون ما يصير قطع/وصل فعلي بهاي الجلسة)، أي عمليات معلّقة من جلسة
+    // سابقة كانت رح تضل عالقة بالطابور لحد ما يصير تغيّر حقيقي بالنت.
+    // هون منتحقق يدوياً عند الإقلاع ومنزامن فوراً لو لقينا نت.
+    unawaited(_syncOnStartup());
+  }
+
+  Future<void> _syncOnStartup() async {
+    final isOnline = await ConnectivityService().checkNow();
+    if (isOnline) {
+      await _syncService.syncPendingOperations();
+    }
   }
 
   Future<void> _onReconnected() async {
     await _syncService.syncPendingOperations();
 
     if (currentTask != null) {
-      await fetchTaskDetails(currentTask!.task.id);
+      if (_currentOrderId != null) {
+        await fetchOrderPreparationDetails(currentTask!.task.id, _currentOrderId!);
+      } else if (_currentShipmentId != null) {
+        await fetchReceivingDetails(currentTask!.task.id, _currentShipmentId!);
+      } else if (_currentReturnId != null) {
+        await fetchReturnDetails(currentTask!.task.id, _currentReturnId!);
+      } else {
+        await fetchTaskDetails(currentTask!.task.id);
+      }
     }
     if (_lastFetchedCategory != null) {
       await _fetchTasksByCategory(_lastFetchedCategory!);
+    }
+    if (_lastFetchedAllTasks) {
+      await fetchAllTasks();
     }
   }
 
@@ -54,6 +92,19 @@ class OrderController extends ChangeNotifier {
   String? listError;
   List<WorkerTask> pendingTasks = [];
   List<WorkerTask> completedTasks = [];
+
+  // ---- قائمة "مهامي" الموحّدة — كل أنواع المهام مع بعض (MyTaskScreen) ----
+  // منفصلة تمامًا عن pendingTasks/completedTasks فوق: هاي مستخدمة من شاشات
+  // بتنفتح بالـ Navigator.push (توب فوق بعض بلحظة معينة)، بينما MyTaskScreen
+  // موجودة دايمًا حية جوا IndexedStack بـ MainShell. لو استخدمنا نفس القوائم،
+  // فتح أي شاشة تصنيف (Preparing/Receiving/...) كان رح يبهدل قائمة "مهامي".
+  static const String _allTasksCacheKey = '__all__';
+  bool isLoadingAllTasks = false;
+  String? allTasksError;
+  bool isAllTasksFromCache = false;
+  List<WorkerTask> allPendingTasks = [];
+  List<WorkerTask> allCompletedTasks = [];
+  bool _lastFetchedAllTasks = false;
 
   // ---- تفاصيل مهمة واحدة (order_details / receiving_details) ----
   bool isLoadingDetails = false;
@@ -155,6 +206,66 @@ class OrderController extends ChangeNotifier {
     notifyListeners();
   }
 
+  // ============================================================
+  // 1-د) "مهامي" — جلب كل المهام من كل الأنواع مع بعض (بلا فلترة category)
+  // GET /workers/tasks بدون أي query params بترجع in_preparation/completed
+  // شاملين كل task_type (order_preparation, shipment_receiving,
+  // damage_disposal, return_pickup, restock_product...) بنفس الرد.
+  // ============================================================
+  Future<void> fetchAllTasks() async {
+    _lastFetchedAllTasks = true;
+    isLoadingAllTasks = true;
+    allTasksError = null;
+    notifyListeners();
+
+    final result = await _taskService.getTasks();
+
+    isLoadingAllTasks = false;
+
+    if (result['success'] == true) {
+      final data = result['data'] as Map<String, dynamic>;
+      final parsed = WorkerTasksResponse.fromJson(data);
+      allPendingTasks = parsed.inPreparation;
+      allCompletedTasks = parsed.completed;
+      isAllTasksFromCache = false;
+      notifyListeners();
+      unawaited(_localStorage.saveTasks(_allTasksCacheKey, data));
+      return;
+    }
+
+    final isNetworkFailure = result['statusCode'] == null;
+
+    if (isNetworkFailure) {
+      final cached = await _localStorage.getTasks(_allTasksCacheKey);
+      if (cached != null) {
+        final parsed = WorkerTasksResponse.fromJson(cached);
+        allPendingTasks = List.of(parsed.inPreparation);
+        allCompletedTasks = List.of(parsed.completed);
+
+        final locallyCompletedIds = await _localCompletedTaskIds();
+        if (locallyCompletedIds.isNotEmpty) {
+          final movedOut = <WorkerTask>[];
+          allPendingTasks.removeWhere((t) {
+            if (locallyCompletedIds.contains(t.id)) {
+              movedOut.add(t);
+              return true;
+            }
+            return false;
+          });
+          allCompletedTasks.addAll(movedOut);
+        }
+
+        isAllTasksFromCache = true;
+        allTasksError = null;
+        notifyListeners();
+        return;
+      }
+    }
+
+    allTasksError = result['message']?.toString() ?? 'Failed to load tasks';
+    notifyListeners();
+  }
+
   // مجموعة الـ taskId يلي انأكدو محلياً (أوفلاين) ولسا بطابور المزامنة
   Future<Set<int>> _localCompletedTaskIds() async {
     final ops = await _localStorage.getPendingOperations(status: 'pending');
@@ -202,6 +313,159 @@ class OrderController extends ChangeNotifier {
     }
 
     detailsError = result['message']?.toString() ?? 'Failed to load task';
+    notifyListeners();
+    return false;
+  }
+
+  // ============================================================
+  // 2-ب) تفاصيل مهمة "تحضير طلب" فقط — GET /workers/orders/{orderId}
+  // taskId: يلزم لعمليات scan/complete لاحقًا (نفس شاشة order_details).
+  // orderId: هو task.related_id من قائمة المهام (Order ID ≠ Task ID).
+  // ============================================================
+  Future<bool> fetchOrderPreparationDetails(int taskId, int orderId) async {
+    _currentOrderId = orderId;
+    isLoadingDetails = true;
+    detailsError = null;
+    notifyListeners();
+
+    final result = await _taskService.getOrderDetails(orderId);
+
+    isLoadingDetails = false;
+
+    if (result['success'] == true) {
+      final data = result['data'] as Map<String, dynamic>;
+      currentTask = TaskDetail.fromOrderJson(
+        data,
+        task: WorkerTask(id: taskId, relatedId: orderId),
+      );
+      isDetailsFromCache = false;
+      detailsError = null;
+      await _applyPendingScansToCurrentTask(taskId);
+      notifyListeners();
+      unawaited(_localStorage.saveTaskDetails(taskId, data));
+      return true;
+    }
+
+    final isNetworkFailure = result['statusCode'] == null;
+
+    if (isNetworkFailure) {
+      final cached = await _localStorage.getTaskDetails(taskId);
+      if (cached != null) {
+        currentTask = TaskDetail.fromOrderJson(
+          cached,
+          task: WorkerTask(id: taskId, relatedId: orderId),
+        );
+        isDetailsFromCache = true;
+        detailsError = null;
+        await _applyPendingScansToCurrentTask(taskId);
+        notifyListeners();
+        return true;
+      }
+    }
+
+    detailsError = result['message']?.toString() ?? 'Failed to load order';
+    notifyListeners();
+    return false;
+  }
+
+  // ============================================================
+  // 2-ج) تفاصيل مهمة "استلام شحنة" فقط — GET /workers/shipments/{shipmentId}
+  // taskId: يلزم لعمليات scan/complete لاحقًا (نفس شاشة receiving_details).
+  // shipmentId: هو task.related_id من قائمة المهام (Shipment ID ≠ Task ID).
+  // ============================================================
+  Future<bool> fetchReceivingDetails(int taskId, int shipmentId) async {
+    _currentShipmentId = shipmentId;
+    isLoadingDetails = true;
+    detailsError = null;
+    notifyListeners();
+
+    final result = await _taskService.getShipmentDetails(shipmentId);
+
+    isLoadingDetails = false;
+
+    if (result['success'] == true) {
+      final data = result['data'] as Map<String, dynamic>;
+      currentTask = TaskDetail.fromShipmentJson(
+        data,
+        task: WorkerTask(id: taskId, relatedId: shipmentId),
+      );
+      isDetailsFromCache = false;
+      detailsError = null;
+      await _applyPendingScansToCurrentTask(taskId);
+      notifyListeners();
+      unawaited(_localStorage.saveTaskDetails(taskId, data));
+      return true;
+    }
+
+    final isNetworkFailure = result['statusCode'] == null;
+
+    if (isNetworkFailure) {
+      final cached = await _localStorage.getTaskDetails(taskId);
+      if (cached != null) {
+        currentTask = TaskDetail.fromShipmentJson(
+          cached,
+          task: WorkerTask(id: taskId, relatedId: shipmentId),
+        );
+        isDetailsFromCache = true;
+        detailsError = null;
+        await _applyPendingScansToCurrentTask(taskId);
+        notifyListeners();
+        return true;
+      }
+    }
+
+    detailsError = result['message']?.toString() ?? 'Failed to load shipment';
+    notifyListeners();
+    return false;
+  }
+
+  // ============================================================
+  // 2-د) تفاصيل مهمة "مرتجع" فقط — GET /workers/returns/{returnId}
+  // taskId: يلزم لعمليات scan/complete لاحقًا (نفس شاشة recovery_details).
+  // returnId: هو task.related_id من قائمة المهام (Return ID ≠ Task ID).
+  // ============================================================
+  Future<bool> fetchReturnDetails(int taskId, int returnId) async {
+    _currentReturnId = returnId;
+    isLoadingDetails = true;
+    detailsError = null;
+    notifyListeners();
+
+    final result = await _taskService.getReturnDetails(returnId);
+
+    isLoadingDetails = false;
+
+    if (result['success'] == true) {
+      final data = result['data'] as Map<String, dynamic>;
+      currentTask = TaskDetail.fromReturnJson(
+        data,
+        task: WorkerTask(id: taskId, relatedId: returnId),
+      );
+      isDetailsFromCache = false;
+      detailsError = null;
+      await _applyPendingScansToCurrentTask(taskId);
+      notifyListeners();
+      unawaited(_localStorage.saveTaskDetails(taskId, data));
+      return true;
+    }
+
+    final isNetworkFailure = result['statusCode'] == null;
+
+    if (isNetworkFailure) {
+      final cached = await _localStorage.getTaskDetails(taskId);
+      if (cached != null) {
+        currentTask = TaskDetail.fromReturnJson(
+          cached,
+          task: WorkerTask(id: taskId, relatedId: returnId),
+        );
+        isDetailsFromCache = true;
+        detailsError = null;
+        await _applyPendingScansToCurrentTask(taskId);
+        notifyListeners();
+        return true;
+      }
+    }
+
+    detailsError = result['message']?.toString() ?? 'Failed to load return';
     notifyListeners();
     return false;
   }
@@ -271,10 +535,33 @@ class OrderController extends ChangeNotifier {
     }
 
     if (currentTask != null) {
-      for (final progressItem in scanResult.progressItems) {
+      // الأولوية للمطابقة عبر product.id (دقيقة، وما بتأثر على منتجات
+      // تانية بنفس المهمة). إذا الباك إند ما رجّع id للمنتج (نوع مهمة
+      // تاني بعده على الشكل القديم)، نرجع للمطابقة بالاسم كـ fallback.
+      final matchedProductId = scanResult.product?.id;
+      bool updatedById = false;
+
+      if (matchedProductId != null && matchedProductId != 0) {
         for (final item in currentTask!.items) {
-          if (item.productName == progressItem.product) {
-            item.pickedQty = progressItem.qty;
+          if (item.productId == matchedProductId) {
+            if (scanResult.progress != null) {
+              item.pickedQty = scanResult.progress!.scanned;
+            } else {
+              item.pickedQty =
+                  (item.pickedQty + 1).clamp(0, item.expectedQty);
+            }
+            updatedById = true;
+            break;
+          }
+        }
+      }
+
+      if (!updatedById) {
+        for (final progressItem in scanResult.progressItems) {
+          for (final item in currentTask!.items) {
+            if (item.productName == progressItem.product) {
+              item.pickedQty = progressItem.qty;
+            }
           }
         }
       }
@@ -429,6 +716,9 @@ class OrderController extends ChangeNotifier {
     scanError = null;
     completeError = null;
     remainingItems = [];
+    _currentOrderId = null;
+    _currentShipmentId = null;
+    _currentReturnId = null;
   }
 }
 

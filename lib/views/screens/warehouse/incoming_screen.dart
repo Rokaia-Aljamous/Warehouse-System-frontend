@@ -107,8 +107,10 @@ class IncomingTabContent extends StatelessWidget {
                     ),
                     const SizedBox(height: 8),
                     _buildRow(Icons.inventory_2_outlined, task.displayTitle),
-                    if (task.relatedStatus != null)
-                      _buildRow(Icons.info_outline, task.relatedStatus!),
+                    _buildRow(
+                      Icons.layers_outlined,
+                      'Quantity: ${task.disposalScannedQuantity} / ${task.disposalQuantity}',
+                    ),
                     const SizedBox(height: 12),
                     Align(
                       alignment: Alignment.centerRight,

@@ -4,12 +4,17 @@
 // لما يرجع النت. يشتغل بترتيب FIFO (نفس ترتيب حصولها) عشان مثلاً
 // عمليات "scan" لمهمة معينة تنبعت قبل عملية "complete" تبعتها.
 //
-// حالياً بيدعم: scan, complete (خاصين بمهام العامل - TaskService).
-// أي نوع عملية غير معروف (مثل disposal لسا ما انبنى) بيتم تجاهله
-// بأمان بدون ما يوقف بقية الطابور.
+// بيدعم: scan, complete (خاصين بمهام العامل - TaskService)، disposal
+// (طلبات الإتلاف الحرة - DisposalService)، وprofile_update (تعديل
+// البروفايل بما فيه الصورة - AuthService).
+// أي نوع عملية غير معروف بيتم تجاهله بأمان بدون ما يوقف بقية الطابور.
+
+import 'dart:io';
 
 import 'package:stock_app/services/task_service.dart';
 import 'package:stock_app/services/local_storage_service.dart';
+import 'package:stock_app/services/disposal_service.dart';
+import 'package:stock_app/services/auth_service.dart';
 
 class SyncResult {
   final int syncedCount;
@@ -24,6 +29,8 @@ class SyncService {
 
   final LocalStorageService _localStorage = LocalStorageService();
   final TaskService _taskService = TaskService();
+  final DisposalService _disposalService = DisposalService();
+  final AuthService _authService = AuthService();
 
   bool _isSyncing = false;
 
@@ -83,19 +90,71 @@ class SyncService {
     required int? taskId,
     required Map<String, dynamic> payload,
   }) async {
-    if (taskId == null) return _SyncOutcome.skipped;
-
     Map<String, dynamic> result;
 
     switch (type) {
       case 'scan':
-        final barcode = payload['barcode']?.toString();
-        if (barcode == null) return _SyncOutcome.skipped;
-        result = await _taskService.scanBarcode(taskId, barcode);
-        break;
+        {
+          if (taskId == null) return _SyncOutcome.skipped;
+          final barcode = payload['barcode']?.toString();
+          if (barcode == null) return _SyncOutcome.skipped;
+          result = await _taskService.scanBarcode(taskId, barcode);
+          break;
+        }
       case 'complete':
+        if (taskId == null) return _SyncOutcome.skipped;
         result = await _taskService.completeTask(taskId);
         break;
+      case 'disposal':
+        {
+          // طلبات الإتلاف الحرة مش مرتبطة بـ task_id (task_id = null بالطابور
+          // دايماً لهاد النوع) — البيانات كلها موجودة بالـ payload.
+          final barcode = payload['barcode']?.toString();
+          final quantity = (payload['quantity'] as num?)?.toInt();
+          final damageReason = payload['damage_reason']?.toString();
+          if (barcode == null || quantity == null || damageReason == null) {
+            return _SyncOutcome.skipped;
+          }
+          result = await _disposalService.createDisposal(
+            barcode: barcode,
+            quantity: quantity,
+            damageReason: damageReason,
+          );
+          break;
+        }
+      case 'profile_update':
+        {
+          // نفس مبدأ 'disposal': ما إلها task_id، وكل البيانات بالـ payload.
+          // imagePath (إذا موجود) هو مسار الصورة المحفوظة محلياً بواسطة
+          // LocalStorageService.persistPendingImage عند التسجيل أوفلاين.
+          final fullName = payload['full_name']?.toString();
+          final phoneNumber = payload['phone_number']?.toString();
+          final birthday = payload['birthday']?.toString();
+          final imagePath = payload['image_path']?.toString();
+
+          File? imageFile;
+          if (imagePath != null && imagePath.isNotEmpty) {
+            final candidate = File(imagePath);
+            if (await candidate.exists()) {
+              imageFile = candidate;
+            }
+            // لو الملف مش موجود (انمسح بطريقة ما)، منكمل بدون صورة بدل
+            // ما نوقف مزامنة باقي الحقول النصية.
+          }
+
+          result = await _authService.updateProfile(
+            fullName: fullName,
+            phoneNumber: phoneNumber,
+            birthday: birthday,
+            profileImage: imageFile,
+          );
+
+          if (result['success'] == true && imagePath != null && imagePath.isNotEmpty) {
+            // انرفعت الصورة بنجاح — منحذف النسخة المحلية المؤقتة.
+            await _localStorage.deletePendingImage(imagePath);
+          }
+          break;
+        }
       default:
         return _SyncOutcome.skipped;
     }

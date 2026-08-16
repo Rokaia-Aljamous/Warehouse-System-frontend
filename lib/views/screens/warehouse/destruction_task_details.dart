@@ -24,22 +24,26 @@ class DestructionTaskDetailsScreen extends StatefulWidget {
   State<DestructionTaskDetailsScreen> createState() =>
       _DestructionTaskDetailsScreenState();
 }
-
 class _DestructionTaskDetailsScreenState
     extends State<DestructionTaskDetailsScreen> {
+  late final OrderController _orderController;
+
   @override
   void initState() {
     super.initState();
+    _orderController = context.read<OrderController>();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<OrderController>().fetchTaskDetails(widget.taskId);
+      _orderController.fetchTaskDetails(widget.taskId);
     });
   }
 
   @override
   void dispose() {
-    context.read<OrderController>().clearCurrentTask();
+    _orderController.clearCurrentTask();
     super.dispose();
   }
+
+ 
 
   Future<void> _handleScan(TaskOrderItem item) async {
     final controller = context.read<OrderController>();

@@ -11,6 +11,7 @@ import '../../../controllers/destruction_controller.dart';
 import '../../../controllers/order_controller.dart';
 import '../../../utils/constants.dart';
 import '../../../views/widgets/auth_widgets.dart';
+import '../../../views/widgets/barcode_scanner_sheet.dart';
 import 'archive_screen.dart';
 import 'incoming_screen.dart';
 import 'disposal_details_screen.dart';
@@ -194,7 +195,12 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
           );
         }
 
-        final items = controller.disposals; // كل الطلبات يلي بعتها العامل بنفسه
+        // بتاب "قائمة طلباتي" منعرض بس الطلبات يلي لسا Pending (ما توافق
+        // عليها الأدمن بعد). أول ما تصير approved، بتختفي من هون تلقائياً
+        // وبتظهر بتاب Archive بس (شوفي ArchiveTabContent).
+        final items = controller.disposals
+            .where((d) => d.status != 'approved')
+            .toList();
 
         if (items.isEmpty) {
           return const Center(
@@ -254,13 +260,14 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Text(
-                      // raw status متل ما إجا من الباك بالضبط، بدون تخمين ألوان
+                      // raw status متل ما إجا من الباك بالضبط، بس بلون
+                      // حسب القيمة: approved أخضر / pending أحمر
                       d.status ?? '-',
-                      style: const TextStyle(
+                      style: TextStyle(
                         fontFamily: 'Inter',
                         fontSize: 20,
                         fontWeight: FontWeight.w600,
-                        color: AppColors.navy,
+                        color: _statusColor(d.status),
                       ),
                     ),
                     const SizedBox(height: 8),
@@ -301,6 +308,18 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
         ],
       ),
     );
+  }
+
+  // أخضر لـ approved، أحمر لـ pending، رمادي لأي قيمة تانية (raw من الباك)
+  Color _statusColor(String? status) {
+    switch (status) {
+      case 'approved':
+        return const Color(0xFF2E7D32);
+      case 'pending':
+        return const Color(0xFFD32F2F);
+      default:
+        return AppColors.navy;
+    }
   }
 
   void _showCreateRequestBottomSheet(BuildContext context) {
@@ -344,8 +363,11 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
               if (success) {
                 Navigator.pop(sheetContext);
                 ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(
-                    content: Text('Destruction request submitted'),
+                  SnackBar(
+                    content: Text(
+                      destructionController.submitSuccessMessage ??
+                          'Destruction request submitted',
+                    ),
                     backgroundColor: AppColors.navy,
                   ),
                 );
@@ -429,22 +451,34 @@ class _MyOrdersTabScreenState extends State<MyOrdersTabScreen>
                         ),
                         child: TextField(
                           controller: productController,
-                          decoration: const InputDecoration(
-                            hintText: 'Enter product barcode or scan',
-                            hintStyle: TextStyle(
+                          readOnly: true,
+                          onTap: () async {
+                            final scanned = await Navigator.push<String>(
+                              sheetContext,
+                              MaterialPageRoute(
+                                builder: (_) => const BarcodeScannerScreen(),
+                              ),
+                            );
+                            if (scanned != null && scanned.isNotEmpty) {
+                              productController.text = scanned;
+                              checkForm();
+                            }
+                          },
+                          decoration: InputDecoration(
+                            hintText: 'Tap to scan product barcode',
+                            hintStyle: const TextStyle(
                               fontFamily: 'Inter',
                               fontSize: 14,
                               color: Colors.black38,
                             ),
-                            prefixIcon: Icon(
-                              Icons.qr_code_scanner,
-                              color: Colors.black54,
-                              size: 22,
-                            ),
                             border: InputBorder.none,
-                            contentPadding: EdgeInsets.symmetric(
+                            contentPadding: const EdgeInsets.symmetric(
                               horizontal: 16,
                               vertical: 14,
+                            ),
+                            suffixIcon: const Icon(
+                              Icons.qr_code_scanner_rounded,
+                              color: Colors.black54,
                             ),
                           ),
                         ),

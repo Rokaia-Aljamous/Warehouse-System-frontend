@@ -29,8 +29,12 @@ class AuthProvider extends ChangeNotifier {
   String? profileUserName;
   String? profileImageUrl;
   String? profileRole;
+  String? profileStatus;
   int? profileWarehouseId;
   bool profileIsFromCache = false;
+  // true من لحظة ما ننسجل تعديل بروفايل أوفلاين لحد ما ينزامن فعلياً
+  // (نفس فلسفة isListFromCache/isDetailsFromCache بـ OrderController)
+  bool profileIsPendingSync = false;
 
   // ============================================================
   // 1) تهيئة التطبيق عند الفتح — يسترجع الجلسة المحفوظة
@@ -85,6 +89,21 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
 
     await _authService.logout();
+
+    // تنظيف ملفات الصور المعلّقة (لو في تعديل بروفايل أوفلاين ما انزامن)
+    // قبل ما clearAll() يمسح مرجعها من الطابور، حتى ما تضل ملفات يتيمة
+    // على الجهاز.
+    final pendingOps = await _localStorage.getPendingOperations(status: 'pending');
+    for (final op in pendingOps) {
+      if (op['type'] == 'profile_update') {
+        final imagePath =
+            (op['payload'] as Map<String, dynamic>)['image_path']?.toString();
+        if (imagePath != null && imagePath.isNotEmpty) {
+          await _localStorage.deletePendingImage(imagePath);
+        }
+      }
+    }
+
     await _localStorage.clearAll();
 
     isLoading = false;
@@ -98,8 +117,10 @@ class AuthProvider extends ChangeNotifier {
     profileUserName = null;
     profileImageUrl = null;
     profileRole = null;
+    profileStatus = null;
     profileWarehouseId = null;
     profileIsFromCache = false;
+    profileIsPendingSync = false;
     notifyListeners();
   }
 
@@ -303,6 +324,7 @@ class AuthProvider extends ChangeNotifier {
       _applyProfileJson(data);
       profileIsFromCache = false;
       errorMessage = null;
+      await _applyPendingProfileEditIfAny();
       notifyListeners();
       // نخزن النسخة الناجحة محلياً عشان تكون جاهزة لو انقطع النت لاحقاً
       unawaited(_localStorage.saveProfile(data));
@@ -319,6 +341,7 @@ class AuthProvider extends ChangeNotifier {
         _applyProfileJson(cached);
         profileIsFromCache = true;
         errorMessage = null;
+        await _applyPendingProfileEditIfAny();
         notifyListeners();
         return;
       }
@@ -328,14 +351,57 @@ class AuthProvider extends ChangeNotifier {
     notifyListeners();
   }
 
+  // لو في تعديل بروفايل اتسجل أوفلاين ولسا بطابور المزامنة، منطبّق
+  // حقوله النصية فوق القيم يلي جبناها لتوّنا (سواء من السيرفر أو الكاش)
+  // حتى ما "يرجع" العرض للقيمة القديمة لما المستخدم يزور شاشة البروفايل
+  // تاني قبل ما تنزامن العملية المعلّقة فعلياً (نفس مبدأ دمج العمليات
+  // المعلّقة المستخدم بـ OrderController/DestructionController).
+  Future<void> _applyPendingProfileEditIfAny() async {
+    final ops = await _localStorage.getPendingOperations(status: 'pending');
+    final pendingEdits = ops.where((op) => op['type'] == 'profile_update');
+
+    if (pendingEdits.isEmpty) {
+      profileIsPendingSync = false;
+      return;
+    }
+
+    // آخر تعديل معلّق هو الأحدث (الطابور FIFO)
+    final payload = pendingEdits.last['payload'] as Map<String, dynamic>;
+    final fullName = payload['full_name']?.toString();
+    final phoneNumber = payload['phone_number']?.toString();
+    final birthday = payload['birthday']?.toString();
+
+    if (fullName != null && fullName.isNotEmpty) profileFullName = fullName;
+    if (phoneNumber != null && phoneNumber.isNotEmpty) {
+      profilePhoneNumber = phoneNumber;
+    }
+    if (birthday != null && birthday.isNotEmpty) profileBirthday = birthday;
+    // ملاحظة: ما منطبّق صورة محلية على profileImageUrl لأن الواجهة بتعرضها
+    // حصراً عبر NetworkImage — الصورة الجديدة رح تظهر تلقائياً أول ما
+    // تنزامن وتنجلب من السيرفر بزيارة لاحقة لشاشة البروفايل.
+
+    profileIsPendingSync = true;
+  }
+
+  // الرد الحقيقي لـ GET /profile مقسوم لكائنين متداخلين، مش حقول مباشرة
+  // على الجذر: {"profile": {full_name, birthday, phone_number, user_name,
+  // profile_image}, "employee": {role, status, warehouse_id}}.
   void _applyProfileJson(Map<String, dynamic> data) {
-    profileFullName = data['full_name']?.toString();
-    profileBirthday = data['birthday']?.toString();
-    profilePhoneNumber = data['phone_number']?.toString();
-    profileUserName = data['user_name']?.toString();
-    profileImageUrl = data['profile_image']?.toString();
-    profileRole = data['role']?.toString();
-    profileWarehouseId = (data['warehouse_id'] as num?)?.toInt();
+    final profile = data['profile'] is Map
+        ? Map<String, dynamic>.from(data['profile'] as Map)
+        : <String, dynamic>{};
+    final employee = data['employee'] is Map
+        ? Map<String, dynamic>.from(data['employee'] as Map)
+        : <String, dynamic>{};
+
+    profileFullName = profile['full_name']?.toString();
+    profileBirthday = profile['birthday']?.toString();
+    profilePhoneNumber = profile['phone_number']?.toString();
+    profileUserName = profile['user_name']?.toString();
+    profileImageUrl = profile['profile_image']?.toString();
+    profileRole = employee['role']?.toString();
+    profileStatus = employee['status']?.toString();
+    profileWarehouseId = (employee['warehouse_id'] as num?)?.toInt();
   }
 
   // ============================================================
@@ -367,23 +433,88 @@ class AuthProvider extends ChangeNotifier {
     isLoading = false;
 
     if (result['success'] == true) {
-      profileFullName = fullName.trim();
-      profilePhoneNumber = phoneNumber.trim();
-      if (birthday != null && birthday.isNotEmpty) profileBirthday = birthday;
+      // الرد الحقيقي: {"message": "...", "profile": {id, full_name, birthday,
+      // phone_number, user_name, profile_image}} — منثق بالقيم الراجعة من
+      // الباك إند كمصدر الحقيقة، مو بالقيم يلي بعتناها إحنا بالطلب.
       final data = result['data'];
-      if (data is Map && data['profile'] is Map) {
-        final p = Map<String, dynamic>.from(data['profile'] as Map);
-        if (p['profile_image'] != null) {
-          profileImageUrl = p['profile_image'].toString();
+      final profile = (data is Map && data['profile'] is Map)
+          ? Map<String, dynamic>.from(data['profile'] as Map)
+          : null;
+
+      if (profile != null) {
+        profileFullName = profile['full_name']?.toString() ?? fullName.trim();
+        profilePhoneNumber =
+            profile['phone_number']?.toString() ?? phoneNumber.trim();
+        profileBirthday = profile['birthday']?.toString() ?? profileBirthday;
+        profileUserName = profile['user_name']?.toString() ?? profileUserName;
+        profileImageUrl = profile['profile_image']?.toString();
+      } else {
+        // fallback احتياطي لو الباك رجع شكل غير متوقع
+        profileFullName = fullName.trim();
+        profilePhoneNumber = phoneNumber.trim();
+        if (birthday != null && birthday.isNotEmpty) {
+          profileBirthday = birthday;
         }
       }
+
       errorMessage = null;
+      profileIsPendingSync = false;
       notifyListeners();
       return true;
+    }
+
+    final isNetworkFailure = result['statusCode'] == null;
+    if (isNetworkFailure) {
+      return _updateProfileOffline(
+        fullName: fullName,
+        phoneNumber: phoneNumber,
+        birthday: birthday,
+        profileImage: profileImage,
+      );
     }
 
     errorMessage = result['message']?.toString() ?? 'Failed to update profile';
     notifyListeners();
     return false;
+  }
+
+  // ============================================================
+  // 9-ب) تعديل البروفايل أوفلاين — بننسخ الصورة (إذا موجودة) لمجلد
+  // دائم، بنسجل العملية بطابور المزامنة، وبنطبّق القيم النصية محلياً
+  // فوراً (نفس منطق الـ "fallback احتياطي" الموجود أصلاً بالمسار
+  // الأونلاين فوق). الصورة نفسها ما بتنعرض إلا بعد ما تنزامن فعلياً
+  // (auth.profileImageUrl معروضة حصراً عبر NetworkImage بالشاشة).
+  // ============================================================
+  Future<bool> _updateProfileOffline({
+    required String fullName,
+    required String phoneNumber,
+    String? birthday,
+    File? profileImage,
+  }) async {
+    String? imagePath;
+    if (profileImage != null) {
+      imagePath = await _localStorage.persistPendingImage(profileImage);
+    }
+
+    await _localStorage.addPendingOperation(
+      type: 'profile_update',
+      payload: {
+        'full_name': fullName.trim(),
+        'phone_number': phoneNumber.trim(),
+        if (birthday != null && birthday.isNotEmpty) 'birthday': birthday,
+        if (imagePath != null) 'image_path': imagePath,
+      },
+    );
+
+    profileFullName = fullName.trim();
+    profilePhoneNumber = phoneNumber.trim();
+    if (birthday != null && birthday.isNotEmpty) {
+      profileBirthday = birthday;
+    }
+    profileIsPendingSync = true;
+
+    errorMessage = null;
+    notifyListeners();
+    return true;
   }
 }

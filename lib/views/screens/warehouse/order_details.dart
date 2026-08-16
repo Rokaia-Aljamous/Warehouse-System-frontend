@@ -1,9 +1,12 @@
 // lib/views/screens/warehouse/order_details.dart
 //
 // شاشة تفاصيل مهمة تحضير — مربوطة بالكامل مع الباك إند:
-//   GET  /workers/tasks/{taskId}          (تحميل التفاصيل)
-//   POST /workers/tasks/{taskId}/scan     (مسح كل منتج بكاميرا الموبايل)
-//   POST /workers/tasks/{taskId}/complete (تأكيد المهمة)
+//   GET  /workers/orders/{orderId}        (تحميل التفاصيل — orderId = task.related_id)
+//   POST /workers/tasks/{taskId}/scan     (مسح كل منتج بكاميرا الموبايل — taskId)
+//   POST /workers/tasks/{taskId}/complete (تأكيد المهمة — taskId)
+//
+// مهم: Task ID ≠ Order ID. الـ scan/complete بتستخدم Task ID دايمًا،
+// وتحميل التفاصيل بيستخدم Order ID (task.related_id) دايمًا.
 //
 // حالات لون كل منتج:
 //   أحمر    -> لسا ما انمسح شي (pickedQty == 0)
@@ -24,27 +27,38 @@ import '../../../views/widgets/barcode_scanner_sheet.dart';
 
 class OrderDetailsScreen extends StatefulWidget {
   final int taskId;
-  const OrderDetailsScreen({super.key, required this.taskId});
+  final int orderId;
+  const OrderDetailsScreen({
+    super.key,
+    required this.taskId,
+    required this.orderId,
+  });
 
   @override
   State<OrderDetailsScreen> createState() => _OrderDetailsScreenState();
 }
 
 class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
+  late final OrderController _orderController;
+
   @override
   void initState() {
     super.initState();
+    _orderController = context.read<OrderController>();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<OrderController>().fetchTaskDetails(widget.taskId);
+      _orderController.fetchOrderPreparationDetails(
+        widget.taskId,
+        widget.orderId,
+      );
     });
   }
 
   @override
   void dispose() {
-    // تنظيف الحالة عند مغادرة الشاشة عشان ما تبقى بيانات مهمة سابقة عالقة
-    context.read<OrderController>().clearCurrentTask();
+    _orderController.clearCurrentTask();
     super.dispose();
   }
+  
 
   Future<void> _handleScan(TaskOrderItem item) async {
     final controller = context.read<OrderController>();
@@ -231,8 +245,9 @@ class _OrderDetailsScreenState extends State<OrderDetailsScreen> {
                               textAlign: TextAlign.center),
                           const SizedBox(height: 12),
                           ElevatedButton(
-                            onPressed: () =>
-                                controller.fetchTaskDetails(widget.taskId),
+                            onPressed: () => controller
+                                .fetchOrderPreparationDetails(
+                                    widget.taskId, widget.orderId),
                             child: const Text('Retry'),
                           ),
                         ],

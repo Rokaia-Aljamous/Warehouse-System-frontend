@@ -1,9 +1,12 @@
 // lib/views/screens/warehouse/receiving_details.dart
 //
 // شاشة تفاصيل مهمة استلام شحنة - مربوطة بالكامل:
-//   GET  /workers/tasks/{taskId}          (تحميل التفاصيل)
-//   POST /workers/tasks/{taskId}/scan     (مسح كل منتج بكاميرا الموبايل)
-//   POST /workers/tasks/{taskId}/complete (تأكيد المهمة)
+//   GET  /workers/shipments/{shipmentId}  (تحميل التفاصيل — shipmentId = task.related_id)
+//   POST /workers/tasks/{taskId}/scan     (مسح كل منتج بكاميرا الموبايل — taskId)
+//   POST /workers/tasks/{taskId}/complete (تأكيد المهمة — taskId)
+//
+// مهم: Task ID ≠ Shipment ID. الـ scan/complete بتستخدم Task ID دايمًا،
+// وتحميل التفاصيل بيستخدم Shipment ID (task.related_id) دايمًا.
 //
 // حالات لون كل منتج:
 //   أحمر    -> لسا ما انمسح شي (receivedQty == 0)
@@ -24,7 +27,12 @@ import '../../../views/widgets/barcode_scanner_sheet.dart';
 
 class ReceivingDetailsScreen extends StatefulWidget {
   final int taskId;
-  const ReceivingDetailsScreen({super.key, required this.taskId});
+  final int shipmentId;
+  const ReceivingDetailsScreen({
+    super.key,
+    required this.taskId,
+    required this.shipmentId,
+  });
 
   @override
   State<ReceivingDetailsScreen> createState() =>
@@ -32,17 +40,24 @@ class ReceivingDetailsScreen extends StatefulWidget {
 }
 
 class _ReceivingDetailsScreenState extends State<ReceivingDetailsScreen> {
+  // نخزّن مرجع الـ controller من initState (يوم لسا الـ widget نشيط وضمن
+  // الشجرة)، ونستخدمه بـ dispose() بدل ما نستدعي context.read() هناك مباشرة.
+  // context.read/watch جوا dispose() غير آمن لأنه الـ widget عندها بيكون
+  // deactivated من الشجرة، وبيرمي FlutterError.
+  late final OrderController _orderController;
+
   @override
   void initState() {
     super.initState();
+    _orderController = context.read<OrderController>();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<OrderController>().fetchTaskDetails(widget.taskId);
+      _orderController.fetchReceivingDetails(widget.taskId, widget.shipmentId);
     });
   }
 
   @override
   void dispose() {
-    context.read<OrderController>().clearCurrentTask();
+    _orderController.clearCurrentTask();
     super.dispose();
   }
 
@@ -230,8 +245,10 @@ class _ReceivingDetailsScreenState extends State<ReceivingDetailsScreen> {
                               textAlign: TextAlign.center),
                           const SizedBox(height: 12),
                           ElevatedButton(
-                            onPressed: () =>
-                                controller.fetchTaskDetails(widget.taskId),
+                            onPressed: () => controller.fetchReceivingDetails(
+                              widget.taskId,
+                              widget.shipmentId,
+                            ),
                             child: const Text('Retry'),
                           ),
                         ],

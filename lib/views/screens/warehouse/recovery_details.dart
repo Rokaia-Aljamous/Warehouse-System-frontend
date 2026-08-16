@@ -1,9 +1,12 @@
 // lib/views/screens/warehouse/recovery_details.dart
 //
 // شاشة تفاصيل مهمة مرتجع (Return) - مربوطة بالكامل:
-//   GET  /workers/tasks/{taskId}          (تحميل التفاصيل)
-//   POST /workers/tasks/{taskId}/scan     (مسح كل منتج بكاميرا الموبايل)
-//   POST /workers/tasks/{taskId}/complete (تأكيد المهمة)
+//   GET  /workers/returns/{returnId}      (تحميل التفاصيل — returnId = task.related_id)
+//   POST /workers/tasks/{taskId}/scan     (مسح كل منتج بكاميرا الموبايل — taskId)
+//   POST /workers/tasks/{taskId}/complete (تأكيد المهمة — taskId)
+//
+// مهم: Task ID ≠ Return ID. الـ scan/complete بتستخدم Task ID دايمًا،
+// وتحميل التفاصيل بيستخدم Return ID (task.related_id) دايمًا.
 //
 // ⚠️ ملاحظة: الباك إند ما بيرجع اسم الزبون لمهام المرتجع (فقط لـ Order)،
 // فبالكارد العلوي هون بنعرض "سبب الإرجاع" ورقم الطلب الأصلي بدل اسم الزبون.
@@ -18,24 +21,35 @@ import '../../../views/widgets/barcode_scanner_sheet.dart';
 
 class RecoveryDetailsScreen extends StatefulWidget {
   final int taskId;
-  const RecoveryDetailsScreen({super.key, required this.taskId});
+  final int returnId;
+  const RecoveryDetailsScreen({
+    super.key,
+    required this.taskId,
+    required this.returnId,
+  });
 
   @override
   State<RecoveryDetailsScreen> createState() => _RecoveryDetailsScreenState();
 }
 
 class _RecoveryDetailsScreenState extends State<RecoveryDetailsScreen> {
+  // نفس مبدأ receiving_details.dart بالظبط: نخزّن مرجع الـ controller من
+  // initState ونستخدمه بـ dispose() لتفادي FlutterError (deactivated widget's
+  // ancestor lookup) اللي بيصير لو استخدمنا context.read() جوا dispose() مباشرة.
+  late final OrderController _orderController;
+
   @override
   void initState() {
     super.initState();
+    _orderController = context.read<OrderController>();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      context.read<OrderController>().fetchTaskDetails(widget.taskId);
+      _orderController.fetchReturnDetails(widget.taskId, widget.returnId);
     });
   }
 
   @override
   void dispose() {
-    context.read<OrderController>().clearCurrentTask();
+    _orderController.clearCurrentTask();
     super.dispose();
   }
 
@@ -232,8 +246,10 @@ class _RecoveryDetailsScreenState extends State<RecoveryDetailsScreen> {
                           ),
                           const SizedBox(height: 12),
                           ElevatedButton(
-                            onPressed: () =>
-                                controller.fetchTaskDetails(widget.taskId),
+                            onPressed: () => controller.fetchReturnDetails(
+                              widget.taskId,
+                              widget.returnId,
+                            ),
                             child: const Text('Retry'),
                           ),
                         ],

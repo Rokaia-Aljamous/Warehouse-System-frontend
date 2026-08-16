@@ -177,11 +177,26 @@ class _PreparingScreenState extends State<PreparingScreen> {
                         final task = tasks[index];
                         return GestureDetector(
                           onTap: () {
+                            // task.relatedId = Order ID (لا يساوي بالضرورة
+                            // task.id). لو لأي سبب غير موجود، منمنع الدخول
+                            // بدل ما نفترض إنه نفس Task ID.
+                            if (task.relatedId == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'This task is missing its order reference from the backend.',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) =>
-                                    OrderDetailsScreen(taskId: task.id),
+                                builder: (context) => OrderDetailsScreen(
+                                  taskId: task.id,
+                                  orderId: task.relatedId!,
+                                ),
                               ),
                             ).then((_) {
                               // بعد الرجوع من التفاصيل، حدّثي القائمة (ممكن

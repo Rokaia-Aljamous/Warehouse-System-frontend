@@ -4,8 +4,9 @@
 //   1) طلبات العامل الحرة  -> DestructionController.disposals (GET /disposals)
 //   2) مهام الأمين الرسمية -> OrderController tasks (GET /tasks?category=Destruction)
 //
-// كل الحقول المعروضة راجعة حرفياً من الباك (status، إلخ)، بدون أي تلوين
-// أو تصنيف مبني على تخمين. كل كرت قابل للضغط يفتح تفاصيله الحقيقية.
+// كل الحقول المعروضة راجعة حرفياً من الباك (status، إلخ). حالة statusText
+// ملوّنة حسب القيمة (approved/completed = أخضر، pending/in_preparation = أحمر).
+// كل كرت قابل للضغط يفتح تفاصيله الحقيقية.
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
@@ -33,11 +34,15 @@ class ArchiveTabContent extends StatelessWidget {
           return const Center(child: CircularProgressIndicator());
         }
 
-        final disposals = destructionController.disposals;
-        final tasks = [
-          ...orderController.pendingTasks,
-          ...orderController.completedTasks,
-        ];
+        // الأرشيف = بس الطلبات الحرة يلي توافق عليها الأدمن (status: approved).
+        // يلي لسا Pending (ما توافق عليه بعد) بتضل بتبويب "Request List" بس،
+        // حتى ما تتكرر أو تظهر كأنها منجزة قبل ما تصير فعلاً.
+        final disposals = destructionController.disposals
+            .where((d) => d.status == 'approved')
+            .toList();
+        // الأرشيف = مهام الإتلاف الرسمية يلي *خلصت* فقط (status: completed).
+        // يلي لسا شغالة عليها (in_preparation) بتضل بتبويب Incoming بس.
+        final tasks = orderController.completedTasks;
 
         if (disposals.isEmpty && tasks.isEmpty) {
           return const Center(
@@ -96,8 +101,13 @@ class ArchiveTabContent extends StatelessWidget {
                     ),
                   ).then((_) => orderController.fetchDestructionTasks()),
                   child: _ArchiveCard(
-                    statusText: t.relatedStatus ?? '-',
-                    lines: [t.displayTitle],
+                    statusText: t.status?.value ?? '-',
+                    lines: [
+                      t.displayTitle,
+                      'Destroyed: ${t.disposalScannedQuantity} / ${t.disposalQuantity}',
+                      if (t.assignedByName != null)
+                        'Assigned by: ${t.assignedByName}',
+                    ],
                     originLabel: 'Admin',
                   ),
                 ),
@@ -120,6 +130,20 @@ class _ArchiveCard extends StatelessWidget {
     required this.lines,
     required this.originLabel,
   });
+
+  // أخضر لـ approved/completed، أحمر لـ pending، رمادي لأي قيمة تانية
+  Color get _statusColor {
+    switch (statusText) {
+      case 'approved':
+      case 'completed':
+        return const Color(0xFF2E7D32);
+      case 'pending':
+      case 'in_preparation':
+        return const Color(0xFFD32F2F);
+      default:
+        return AppColors.navy;
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -144,11 +168,11 @@ class _ArchiveCard extends StatelessWidget {
         children: [
           Text(
             statusText,
-            style: const TextStyle(
+            style: TextStyle(
               fontFamily: 'Inter',
               fontSize: 18,
               fontWeight: FontWeight.w600,
-              color: AppColors.navy,
+              color: _statusColor,
             ),
           ),
           const SizedBox(height: 8),

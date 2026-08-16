@@ -1,10 +1,11 @@
 // lib/models/order_model.dart
 //
 // نماذج بيانات مهام العامل القادمة من الباك إند. تغطي:
-//   - قائمة المهام:            GET  /workers/tasks
-//   - تفاصيل مهمة واحدة:       GET  /workers/tasks/{id}
-//   - نتيجة مسح باركود:        POST /workers/tasks/{id}/scan
-//   - عناصر ناقصة عند الإكمال: POST /workers/tasks/{id}/complete (409)
+//   - قائمة المهام:                 GET  /workers/tasks
+//   - تفاصيل مهمة (عام):           GET  /workers/tasks/{taskId}       (Receiving/Returns/Destruction)
+//   - تفاصيل مهمة Order preparation: GET  /workers/orders/{orderId}     (Task.related_id)
+//   - نتيجة مسح باركود:             POST /workers/tasks/{taskId}/scan
+//   - عناصر ناقصة عند الإكمال:      POST /workers/tasks/{taskId}/complete (409)
 
 enum TaskType {
   orderPreparation('order_preparation'),
@@ -53,6 +54,16 @@ class WorkerTask {
   final DateTime? createdAt;
   final DateTime? updatedAt;
 
+  // ---- خاص فقط بمهام الإتلاف الرسمية (task_type: damage_disposal) ----
+  // هاي المهمة الوحيدة يلي بترجع منتجها وكميتها مباشرة على مستوى التاسك
+  // (مافي "related" — related_id/related_type بيضلو null دايمًا إلها).
+  final int? disposalProductId;
+  final String? disposalProductName;
+  final String? disposalBarcode;
+  final int disposalQuantity;
+  final int disposalScannedQuantity;
+  final String? assignedByName; // من "superadmin.full_name"
+
   const WorkerTask({
     required this.id,
     this.taskType,
@@ -63,11 +74,28 @@ class WorkerTask {
     this.relatedStatus,
     this.createdAt,
     this.updatedAt,
+    this.disposalProductId,
+    this.disposalProductName,
+    this.disposalBarcode,
+    this.disposalQuantity = 0,
+    this.disposalScannedQuantity = 0,
+    this.assignedByName,
   });
 
   factory WorkerTask.fromJson(Map<String, dynamic> j) {
     final related = j['related'] is Map
         ? Map<String, dynamic>.from(j['related'] as Map)
+        : null;
+
+    // منتج مهمة الإتلاف (damage_disposal) — يجي مباشرة كـ "product" على
+    // التاسك نفسو، مش جوا "related". الباركود الحقيقي للمسح هو
+    // parcel_barcode (نفس مبدأ TaskOrderItem تحت).
+    final disposalProduct = j['product'] is Map
+        ? Map<String, dynamic>.from(j['product'] as Map)
+        : null;
+
+    final superadmin = j['superadmin'] is Map
+        ? Map<String, dynamic>.from(j['superadmin'] as Map)
         : null;
 
     return WorkerTask(
@@ -80,11 +108,54 @@ class WorkerTask {
       relatedStatus: related?['status']?.toString(),
       createdAt: DateTime.tryParse(j['created_at']?.toString() ?? ''),
       updatedAt: DateTime.tryParse(j['updated_at']?.toString() ?? ''),
+      disposalProductId: (disposalProduct?['id'] as num?)?.toInt(),
+      disposalProductName: disposalProduct?['name']?.toString(),
+      disposalBarcode: (disposalProduct?['parcel_barcode'] ??
+              disposalProduct?['barcode'] ??
+              disposalProduct?['piece_barcode'])
+          ?.toString(),
+      disposalQuantity: (j['disposal_quantity'] as num?)?.toInt() ?? 0,
+      disposalScannedQuantity:
+          (j['disposal_scanned_quantity'] as num?)?.toInt() ?? 0,
+      assignedByName: superadmin?['full_name']?.toString(),
     );
   }
 
+  bool get isDamageDisposal => taskType == TaskType.damageDisposal;
+  int get disposalRemaining =>
+      (disposalQuantity - disposalScannedQuantity).clamp(0, disposalQuantity);
+
+  // تسمية مقروءة حسب نوع المهمة — تُستخدم كـ fallback لما الباك إند ما يرجّع
+  // "related" (زي حالات الاختبار الحالية)، ومفيدة أيضاً بشاشة "مهامي" يلي
+  // بتعرض كل الأنواع مع بعض فمهم نوضح شو نوع كل كرت.
+  String get _taskTypeLabel {
+    switch (taskType) {
+      case TaskType.orderPreparation:
+        return 'Order';
+      case TaskType.orderDelivery:
+        return 'Delivery';
+      case TaskType.transferPreparation:
+        return 'Transfer';
+      case TaskType.transferDelivery:
+        return 'Transfer Delivery';
+      case TaskType.shipmentReceiving:
+        return 'Shipment';
+      case TaskType.returnPickup:
+        return 'Return';
+      case TaskType.restockProduct:
+        return 'Return';
+      case TaskType.damageDisposal:
+        return 'Disposal';
+      case null:
+        return 'Task';
+    }
+  }
+
   String get displayTitle {
-    final entity = relatedEntityType ?? 'Order';
+    if (isDamageDisposal) {
+      return disposalProductName ?? 'Product #${disposalProductId ?? id}';
+    }
+    final entity = relatedEntityType ?? _taskTypeLabel;
     return '$entity #${relatedId ?? id}';
   }
 }
@@ -158,7 +229,12 @@ class TaskOrderItem {
           (product['id'] as num?)?.toInt(),
       productName: product['name']?.toString() ?? 'Product',
       brand: product['brand']?.toString(),
-      barcode: (product['barcode'] ?? product['piece_barcode'])?.toString(),
+      // الباركود الحقيقي للمسح هو parcel_barcode (piece_barcode مش باركود فعلي،
+      // مثلاً "2" — مجرد قيمة داخلية بالباك إند).
+      barcode: (product['parcel_barcode'] ??
+              product['barcode'] ??
+              product['piece_barcode'])
+          ?.toString(),
       expectedQty: qty,
       pickedQty: picked?.toInt() ?? 0,
     );
@@ -200,6 +276,53 @@ class TaskDetail {
   });
 
   factory TaskDetail.fromJson(Map<String, dynamic> j) {
+    // ============================================================
+    // الحالة الحقيقية الوحيدة يلي بتستخدم هاد الـ fromJson العام حاليًا:
+    // مهام الإتلاف الرسمية (damage_disposal) عبر GET /workers/tasks/{taskId}.
+    // الباك بيرجع التاسك مباشرة (نفس شكل عنصر قائمة /workers/tasks تمامًا):
+    // {id, task_type, status, product: {...}, disposal_quantity,
+    //  disposal_scanned_quantity, ...} — بدون "task"/"related" wrapper.
+    // ============================================================
+    if (j['task'] == null &&
+        (j['task_type'] != null ||
+            j['product'] != null ||
+            j['disposal_quantity'] != null)) {
+      final task = WorkerTask.fromJson(j);
+      final product = j['product'] is Map
+          ? Map<String, dynamic>.from(j['product'] as Map)
+          : null;
+
+      final expected = (j['disposal_quantity'] as num?)?.toInt() ?? 0;
+      final scanned = (j['disposal_scanned_quantity'] as num?)?.toInt() ?? 0;
+
+      final items = product != null
+          ? [
+              TaskOrderItem(
+                id: (product['id'] as num?)?.toInt() ?? 0,
+                productId: (product['id'] as num?)?.toInt(),
+                productName: product['name']?.toString() ?? 'Product',
+                brand: product['brand']?.toString(),
+                barcode: (product['parcel_barcode'] ??
+                        product['barcode'] ??
+                        product['piece_barcode'])
+                    ?.toString(),
+                expectedQty: expected,
+                pickedQty: scanned,
+              ),
+            ]
+          : <TaskOrderItem>[];
+
+      return TaskDetail(
+        task: task,
+        relatedEntityType: 'Destruction',
+        items: items,
+      );
+    }
+
+    // ============================================================
+    // شكل احتياطي (task/related wrapper) — لأي نوع مهمة تاني ممكن يستخدم
+    // نفس الـ endpoint العام مستقبلاً بهاي البنية.
+    // ============================================================
     final task = WorkerTask.fromJson(
       j['task'] is Map ? Map<String, dynamic>.from(j['task'] as Map) : {},
     );
@@ -245,26 +368,148 @@ class TaskDetail {
 
   bool get allItemsComplete =>
       items.isNotEmpty && items.every((i) => i.isComplete);
+
+  // ============================================================
+  // تفاصيل مهمة "تحضير طلب" فقط — GET /workers/orders/{orderId}
+  // بنية مختلفة تمامًا عن fromJson العامة فوق: مافي "task"/"related" wrapper،
+  // البيانات مباشرة تحت "order" + "progress".
+  // الـ [task] هون هو الكائن الأساسي من قائمة المهام (WorkerTask) اللي عنده
+  // Task ID الصحيح (يلزم لاحقًا لعمليات scan/complete).
+  // ============================================================
+  factory TaskDetail.fromOrderJson(
+    Map<String, dynamic> j, {
+    required WorkerTask task,
+  }) {
+    final order = j['order'] is Map
+        ? Map<String, dynamic>.from(j['order'] as Map)
+        : <String, dynamic>{};
+
+    final customer = order['customer'] is Map
+        ? Map<String, dynamic>.from(order['customer'] as Map)
+        : null;
+
+    final itemsJson = order['items'];
+    final items = itemsJson is List
+        ? itemsJson
+              .whereType<Map>()
+              .map((e) => TaskOrderItem.fromJson(Map<String, dynamic>.from(e)))
+              .toList()
+        : <TaskOrderItem>[];
+
+    return TaskDetail(
+      task: task,
+      relatedEntityType: 'Order',
+      customerId: (customer?['id'] as num?)?.toInt(),
+      customerName: customer?['full_name']?.toString(),
+      factoryName: null,
+      returnReason: null,
+      returnType: null,
+      relatedOrderId: (order['id'] as num?)?.toInt(),
+      items: items,
+    );
+  }
+
+  // ============================================================
+  // تفاصيل مهمة "استلام شحنة" فقط — GET /workers/shipments/{shipmentId}
+  // نفس بنية fromOrderJson تمامًا لكن الجذر هون "shipment" مش "order"،
+  // ومافي customer (الشحنة جايي من مصنع لا من زبون).
+  // الـ [task] هون هو الكائن الأساسي من قائمة المهام (WorkerTask) اللي عنده
+  // Task ID الصحيح (يلزم لاحقًا لعمليات scan/complete).
+  // ============================================================
+  factory TaskDetail.fromShipmentJson(
+    Map<String, dynamic> j, {
+    required WorkerTask task,
+  }) {
+    final shipment = j['shipment'] is Map
+        ? Map<String, dynamic>.from(j['shipment'] as Map)
+        : <String, dynamic>{};
+
+    final itemsJson = shipment['items'];
+    final items = itemsJson is List
+        ? itemsJson
+              .whereType<Map>()
+              .map((e) => TaskOrderItem.fromJson(Map<String, dynamic>.from(e)))
+              .toList()
+        : <TaskOrderItem>[];
+
+    return TaskDetail(
+      task: task,
+      relatedEntityType: 'Shipment',
+      customerId: null,
+      customerName: null,
+      factoryName: shipment['factory_name']?.toString(),
+      returnReason: null,
+      returnType: null,
+      relatedOrderId: (shipment['id'] as num?)?.toInt(),
+      items: items,
+    );
+  }
+
+  // ============================================================
+  // تفاصيل مهمة "مرتجع" فقط — GET /workers/returns/{returnId}
+  // الجذر هون "return"، وفيه return_reason/return_type مباشرة، والعناصر
+  // كل وحدة فيها order_item متضمّن product جواتو (مو نفس بنية shipment/order
+  // اللي فيها product مباشرة على العنصر). TaskOrderItem.fromJson أصلاً
+  // بيتحقق من order_item.product كأولوية، فما في داعي لتعديل عليه.
+  // ملاحظة: الباك إند ما بيرجع اسم/بيانات الزبون هون (بس order.customer_id
+  // كرقم)، فـ customerName بتضل null بقصد.
+  // ============================================================
+  factory TaskDetail.fromReturnJson(
+    Map<String, dynamic> j, {
+    required WorkerTask task,
+  }) {
+    final ret = j['return'] is Map
+        ? Map<String, dynamic>.from(j['return'] as Map)
+        : <String, dynamic>{};
+
+    final itemsJson = ret['items'];
+    final items = itemsJson is List
+        ? itemsJson
+              .whereType<Map>()
+              .map((e) => TaskOrderItem.fromJson(Map<String, dynamic>.from(e)))
+              .toList()
+        : <TaskOrderItem>[];
+
+    final orderJson = ret['order'] is Map
+        ? Map<String, dynamic>.from(ret['order'] as Map)
+        : null;
+
+    return TaskDetail(
+      task: task,
+      relatedEntityType: 'Return',
+      customerId: (orderJson?['customer_id'] as num?)?.toInt(),
+      customerName: null,
+      factoryName: null,
+      returnReason: ret['return_reason']?.toString(),
+      returnType: ret['return_type']?.toString(),
+      relatedOrderId:
+          (ret['order_id'] as num?)?.toInt() ??
+          (orderJson?['id'] as num?)?.toInt(),
+      items: items,
+    );
+  }
 }
 
 class ScanResult {
   final bool matched;
   final ScanProduct? product;
   final String? warning;
+  final ScanProgress? progress;
   final List<ScanProgressItem> progressItems;
 
   const ScanResult({
     required this.matched,
     this.product,
     this.warning,
+    this.progress,
     required this.progressItems,
   });
 
   factory ScanResult.fromJson(Map<String, dynamic> j) {
-    final progress = j['progress'] is Map
+    final progressJson = j['progress'] is Map
         ? Map<String, dynamic>.from(j['progress'] as Map)
         : null;
-    final itemsJson = progress?['items'];
+    final itemsJson = progressJson?['items'];
 
     String? warning = j['warning']?.toString();
     if (warning == null && j['warnings'] is List) {
@@ -278,6 +523,7 @@ class ScanResult {
           ? ScanProduct.fromJson(Map<String, dynamic>.from(j['product']))
           : null,
       warning: warning,
+      progress: progressJson != null ? ScanProgress.fromJson(progressJson) : null,
       progressItems: itemsJson is List
           ? itemsJson
                 .whereType<Map>()
@@ -289,6 +535,29 @@ class ScanResult {
           : [],
     );
   }
+}
+
+// تقدّم المنتج المفرد المطابق للباركود المرسول بهاد النداء تحديدًا
+// (وليس كل عناصر المهمة) — هيك بيرجعه الباك إند الحقيقي.
+class ScanProgress {
+  final int expected;
+  final int scanned;
+  final int remaining;
+  final bool complete;
+
+  const ScanProgress({
+    required this.expected,
+    required this.scanned,
+    required this.remaining,
+    required this.complete,
+  });
+
+  factory ScanProgress.fromJson(Map<String, dynamic> j) => ScanProgress(
+    expected: (j['expected'] as num?)?.toInt() ?? 0,
+    scanned: (j['scanned'] as num?)?.toInt() ?? (j['picked'] as num?)?.toInt() ?? 0,
+    remaining: (j['remaining'] as num?)?.toInt() ?? 0,
+    complete: j['complete'] == true,
+  );
 }
 
 class ScanProduct {
@@ -319,7 +588,7 @@ class ScanProgressItem {
   factory ScanProgressItem.fromJson(Map<String, dynamic> j) => ScanProgressItem(
     product: j['product']?.toString() ?? '',
     expected: (j['expected'] as num?)?.toInt() ?? 0,
-    qty: ((j['received'] ?? j['picked'] ?? j['restocked'] ?? 0) as num).toInt(),
+    qty: ((j['picked'] ?? j['received'] ?? j['restocked'] ?? 0) as num).toInt(),
   );
 }
 

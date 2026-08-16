@@ -143,11 +143,26 @@ class _RecoveryScreenState extends State<RecoveryScreen> {
                         final task = tasks[index];
                         return GestureDetector(
                           onTap: () {
+                            // task.relatedId = Return ID (لا يساوي بالضرورة
+                            // task.id). لو لأي سبب غير موجود، منمنع الدخول
+                            // بدل ما نفترض إنه نفس Task ID.
+                            if (task.relatedId == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'This task is missing its return reference from the backend.',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) =>
-                                    RecoveryDetailsScreen(taskId: task.id),
+                                builder: (context) => RecoveryDetailsScreen(
+                                  taskId: task.id,
+                                  returnId: task.relatedId!,
+                                ),
                               ),
                             ).then((_) => _refresh());
                           },

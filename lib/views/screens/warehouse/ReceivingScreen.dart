@@ -179,11 +179,26 @@ class _ReceivingScreenState extends State<ReceivingScreen> {
                         final task = tasks[index];
                         return GestureDetector(
                           onTap: () {
+                            // task.relatedId = Shipment ID (لا يساوي بالضرورة
+                            // task.id). لو لأي سبب غير موجود، منمنع الدخول
+                            // بدل ما نفترض إنه نفس Task ID.
+                            if (task.relatedId == null) {
+                              ScaffoldMessenger.of(context).showSnackBar(
+                                const SnackBar(
+                                  content: Text(
+                                    'This task is missing its shipment reference from the backend.',
+                                  ),
+                                ),
+                              );
+                              return;
+                            }
                             Navigator.push(
                               context,
                               MaterialPageRoute(
-                                builder: (context) =>
-                                    ReceivingDetailsScreen(taskId: task.id),
+                                builder: (context) => ReceivingDetailsScreen(
+                                  taskId: task.id,
+                                  shipmentId: task.relatedId!,
+                                ),
                               ),
                             ).then((_) => _refresh());
                           },
