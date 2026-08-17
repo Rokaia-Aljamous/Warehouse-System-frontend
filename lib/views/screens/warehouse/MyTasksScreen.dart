@@ -65,6 +65,7 @@ class _MyTaskScreenState extends State<MyTaskScreen> {
         destination = OrderDetailsScreen(
           taskId: task.id,
           orderId: task.relatedId!,
+          initialStatus: task.status,
         );
         break;
       case TaskType.shipmentReceiving:
@@ -72,6 +73,7 @@ class _MyTaskScreenState extends State<MyTaskScreen> {
         destination = ReceivingDetailsScreen(
           taskId: task.id,
           shipmentId: task.relatedId!,
+          initialStatus: task.status,
         );
         break;
       case TaskType.returnPickup:
@@ -80,6 +82,7 @@ class _MyTaskScreenState extends State<MyTaskScreen> {
         destination = RecoveryDetailsScreen(
           taskId: task.id,
           returnId: task.relatedId!,
+          initialStatus: task.status,
         );
         break;
       default:

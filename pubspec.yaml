@@ -11,6 +11,8 @@ dependencies:
     sdk: flutter
   cupertino_icons: ^1.0.8
   flutter_map: ^8.3.0
+  latlong2: 0.10.1
+  geolocator: 13.0.4
   # ---- منطق المصادقة والـ API مأخوذ من المشروع الأول ----
   provider: ^6.1.2
   dio: ^5.7.0

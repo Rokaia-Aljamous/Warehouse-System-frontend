@@ -1,405 +1,313 @@
-// lib/views/screens/warehouse/MyTasksScreen.dart
-
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:stock_app/controllers/driver_controller.dart';
+import 'package:stock_app/models/driver_task_model.dart';
 import 'package:stock_app/utils/constants.dart';
+import 'package:stock_app/views/screens/driver/driver_task_details_screen.dart';
 import 'package:stock_app/views/widgets/delivery_bottom_nav.dart';
-import 'package:stock_app/views/screens/driver/map_screen.dart';
-// 🌟 منطق المصادقة مأخوذ من المشروع الأول (AuthService متاح لقراءة بيانات السائق المسجل)
-import 'package:stock_app/services/auth_service.dart';
+import 'package:stock_app/views/widgets/driver_task_card.dart';
 
-class MyTasksScreen extends StatefulWidget {
+class MyTasksScreen extends StatelessWidget {
   const MyTasksScreen({super.key});
 
   @override
-  State<MyTasksScreen> createState() => _MyTasksScreenState();
+  Widget build(BuildContext context) {
+    return ChangeNotifierProvider(
+      create: (_) => DriverController()..initialize(),
+      child: const _DriverShell(),
+    );
+  }
 }
 
-class _MyTasksScreenState extends State<MyTasksScreen> {
-  int _currentIndex = 0;
+class _DriverShell extends StatefulWidget {
+  const _DriverShell();
 
-  // الصفحات
-  final List<Widget> _pages = [const _HomeContent(), const MapScreen()];
+  @override
+  State<_DriverShell> createState() => _DriverShellState();
+}
+
+class _DriverShellState extends State<_DriverShell> {
+  Future<void> _openTask(DriverTask task) async {
+    final controller = context.read<DriverController>();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChangeNotifierProvider.value(
+          value: controller,
+          child: DriverTaskDetailsScreen(task: task),
+        ),
+      ),
+    );
+    if (mounted) await controller.refreshAll();
+  }
 
   @override
   Widget build(BuildContext context) {
-    final screenHeight = MediaQuery.of(context).size.height;
-    final screenWidth = MediaQuery.of(context).size.width;
+    return Scaffold(
+      backgroundColor: AppColors.beige,
+      body: _DriverHomePage(onOpenTask: _openTask),
+      bottomNavigationBar: DeliveryBottomNav(currentIndex: 0, onTap: (_) {}),
+    );
+  }
+}
+
+class _DriverHomePage extends StatelessWidget {
+  final ValueChanged<DriverTask> onOpenTask;
+
+  const _DriverHomePage({required this.onOpenTask});
+
+  @override
+  Widget build(BuildContext context) {
+    final controller = context.watch<DriverController>();
+    final summary = controller.summary;
 
     return Scaffold(
       backgroundColor: AppColors.beige,
-      body: _currentIndex == 0
-          ? Column(
-              children: [
-                _MyTasksHeader(
-                  screenHeight: screenHeight,
-                  screenWidth: screenWidth,
+      body: RefreshIndicator(
+        onRefresh: controller.refreshAll,
+        child: CustomScrollView(
+          physics: const AlwaysScrollableScrollPhysics(),
+          slivers: [
+            const SliverToBoxAdapter(child: _DriverHeader()),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(24, 18, 24, 14),
+              sliver: SliverToBoxAdapter(
+                child: _SummaryCard(
+                  total: summary.total,
+                  completed: summary.completed,
+                  percentage: summary.completionPercentage,
+                  isLoading: controller.isLoadingSummary,
                 ),
-                Expanded(child: _pages[0]),
-              ],
-            )
-          : _pages[_currentIndex],
-      bottomNavigationBar: DeliveryBottomNav(
-        currentIndex: _currentIndex,
-        onTap: (index) {
-          setState(() => _currentIndex = index);
-        },
+              ),
+            ),
+            SliverPadding(
+              padding: const EdgeInsets.fromLTRB(24, 8, 24, 10),
+              sliver: SliverToBoxAdapter(
+                child: Row(
+                  children: [
+                    const Expanded(
+                      child: Text(
+                        'Main Driver Tasks',
+                        style: TextStyle(
+                          fontSize: 18,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.navy,
+                        ),
+                      ),
+                    ),
+                    Text(
+                      '${controller.pendingTasks.length} pending',
+                      style: const TextStyle(color: Colors.black54),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+            if (controller.isLoadingTasks && controller.pendingTasks.isEmpty)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(child: CircularProgressIndicator()),
+              )
+            else if (controller.tasksError != null &&
+                controller.pendingTasks.isEmpty)
+              SliverFillRemaining(
+                hasScrollBody: false,
+                child: _DriverError(
+                  message: controller.tasksError!,
+                  onRetry: controller.fetchTasks,
+                ),
+              )
+            else if (controller.pendingTasks.isEmpty)
+              const SliverFillRemaining(
+                hasScrollBody: false,
+                child: Center(child: Text('No pending driver tasks')),
+              )
+            else
+              SliverPadding(
+                padding: const EdgeInsets.fromLTRB(24, 0, 24, 120),
+                sliver: SliverList.separated(
+                  itemCount: controller.pendingTasks.length,
+                  separatorBuilder: (_, _) => const SizedBox(height: 12),
+                  itemBuilder: (context, index) {
+                    final task = controller.pendingTasks[index];
+                    return DriverTaskCard(
+                      task: task,
+                      onTap: () => onOpenTask(task),
+                    );
+                  },
+                ),
+              ),
+          ],
+        ),
       ),
     );
   }
 }
 
-// ============================================================
-// محتوى الهوم منفصل كـ Widget
-// ============================================================
-class _HomeContent extends StatelessWidget {
-  const _HomeContent();
+class _SummaryCard extends StatelessWidget {
+  final int total;
+  final int completed;
+  final double percentage;
+  final bool isLoading;
+
+  const _SummaryCard({
+    required this.total,
+    required this.completed,
+    required this.percentage,
+    required this.isLoading,
+  });
 
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      padding: const EdgeInsets.symmetric(horizontal: 40, vertical: 20),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Row(
-            crossAxisAlignment: CrossAxisAlignment.center,
-            children: [
-              Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: const [
-                  Text(
-                    '12',
-                    style: TextStyle(
-                      fontFamily: 'Inter',
-                      fontSize: 65,
-                      fontWeight: FontWeight.w700,
-                      color: AppColors.navy,
-                    ),
-                  ),
-                  Row(
-                    children: [
-                      Icon(Icons.flag_outlined, color: Colors.orange, size: 16),
-                      SizedBox(width: 4),
-                      Text(
-                        "Today's\nDestinations",
-                        style: TextStyle(
-                          fontFamily: 'Inter',
-                          fontSize: 13,
-                          color: Colors.black54,
-                        ),
-                      ),
-                    ],
-                  ),
-                ],
-              ),
-              const SizedBox(width: 24),
-              const Text(
-                '|',
-                style: TextStyle(
-                  fontSize: 60,
-                  color: Colors.black12,
-                  fontWeight: FontWeight.w100,
-                ),
-              ),
-              const SizedBox(width: 24),
-              SizedBox(
-                width: 140,
-                height: 140,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    SizedBox(
-                      width: 120,
-                      height: 120,
-                      child: CircularProgressIndicator(
-                        value: 2 / 12,
-                        strokeWidth: 20,
-                        backgroundColor: Colors.grey.shade200,
-                        valueColor: const AlwaysStoppedAnimation<Color>(
-                          AppColors.navy,
-                        ),
-                      ),
-                    ),
-                    Column(
-                      mainAxisSize: MainAxisSize.min,
-                      children: const [
-                        Text(
-                          '2/12',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 18,
-                            fontWeight: FontWeight.w700,
-                            color: AppColors.navy,
-                          ),
-                        ),
-                        SizedBox(height: 4),
-                        Text(
-                          'Delivered',
-                          style: TextStyle(
-                            fontFamily: 'Inter',
-                            fontSize: 10,
-                            color: Colors.black45,
-                          ),
-                        ),
-                      ],
-                    ),
-                  ],
-                ),
-              ),
-            ],
-          ),
+    final progress = total == 0
+        ? 0.0
+        : (percentage / 100).clamp(0.0, 1.0).toDouble();
 
-          const SizedBox(height: 20),
-
-          Container(
-            width: double.infinity,
-            padding: const EdgeInsets.all(16),
-            decoration: BoxDecoration(
-              color: Colors.white,
-              borderRadius: BorderRadius.circular(20),
-              border: Border.all(
-                color: AppColors.navy.withOpacity(0.2),
-                width: 1,
-              ),
-              boxShadow: [
-                BoxShadow(
-                  color: Colors.black.withOpacity(0.05),
-                  blurRadius: 6,
-                  offset: const Offset(0, 3),
-                ),
-              ],
-            ),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Row(
-                  children: const [
-                    Icon(Icons.person_outline, color: Colors.black54, size: 18),
-                    SizedBox(width: 8),
-                    Text(
-                      'Customer Name:',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 14,
-                        color: Colors.black87,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 8),
-                Row(
-                  children: const [
-                    Icon(
-                      Icons.location_on_outlined,
-                      color: Colors.black54,
-                      size: 18,
-                    ),
-                    SizedBox(width: 8),
-                    Text(
-                      'Location:',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 14,
-                        color: Colors.black87,
-                      ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 16),
-                SizedBox(
-                  width: double.infinity,
-                  child: ElevatedButton.icon(
-                    onPressed: () {},
-                    icon: const Icon(
-                      Icons.navigation_outlined,
-                      color: Colors.white,
-                      size: 18,
-                    ),
-                    label: const Text(
-                      'Start The Path',
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.white,
-                      ),
-                    ),
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: AppColors.navy,
-                      padding: const EdgeInsets.symmetric(vertical: 14),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(12),
-                      ),
-                      elevation: 0,
-                    ),
-                  ),
-                ),
-              ],
-            ),
-          ),
-
-          const SizedBox(height: 24),
-
-          const Text(
-            'List Of Remaining Tasks',
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 16,
-              fontWeight: FontWeight.w600,
-              color: AppColors.navy,
-            ),
-          ),
-          const SizedBox(height: 12),
-          _buildTaskCard('Customer Name:', 'Order Status : Ready To Download'),
-          const SizedBox(height: 12),
-          _buildTaskCard(
-            'Customer Name:',
-            'Order Status : Waiting For Processing',
-          ),
-        ],
-      ),
-    );
-  }
-
-  Widget _buildTaskCard(String name, String status) {
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.all(14),
+      padding: const EdgeInsets.all(20),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(14),
-        border: Border.all(color: AppColors.navy.withOpacity(0.15), width: 1),
+        borderRadius: BorderRadius.circular(20),
         boxShadow: [
           BoxShadow(
-            color: Colors.black.withOpacity(0.04),
-            blurRadius: 6,
-            offset: const Offset(0, 3),
+            color: Colors.black.withValues(alpha: 0.05),
+            blurRadius: 10,
+            offset: const Offset(0, 5),
           ),
         ],
       ),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Text(
-            name,
-            style: const TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 14,
-              fontWeight: FontWeight.w500,
-              color: Colors.black87,
-            ),
-          ),
-          const SizedBox(height: 6),
-          Text(
-            status,
-            style: TextStyle(
-              fontFamily: 'Inter',
-              fontSize: 13,
-              color: Colors.grey.shade600,
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-}
-
-// ============================================================
-// الهيدر
-// ============================================================
-class _MyTasksHeader extends StatelessWidget {
-  final double screenHeight;
-  final double screenWidth;
-
-  const _MyTasksHeader({required this.screenHeight, required this.screenWidth});
-
-  @override
-  Widget build(BuildContext context) {
-    final double headerHeight = screenHeight * 0.22;
-
-    return SizedBox(
-      width: double.infinity,
-      height: headerHeight,
-      child: Stack(
-        children: [
-          Container(
-            width: double.infinity,
-            height: headerHeight,
-            color: AppColors.navy,
-          ),
-          Positioned(
-            bottom: 0,
-            left: 0,
-            right: 0,
-            child: CustomPaint(
-              size: Size(double.infinity, headerHeight * 0.45),
-              painter: _MyTasksWavePainter(waveColor: AppColors.beige),
-            ),
-          ),
-          SafeArea(
-            bottom: false,
-            child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: 16.0,
-                vertical: 4.0,
-              ),
-              child: Row(
-                children: [
-                  IconButton(
-                    icon: const Icon(Icons.tune, color: Colors.white, size: 26),
-                    onPressed: () {},
-                  ),
-                  const Expanded(
-                    child: Text(
-                      "Today's Summary",
-                      textAlign: TextAlign.center,
-                      style: TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 22,
-                        fontWeight: FontWeight.w600,
-                        color: Colors.white,
-                      ),
-                    ),
-                  ),
-                  Stack(
-                    clipBehavior: Clip.none,
+      child: isLoading && total == 0
+          ? const SizedBox(
+              height: 120,
+              child: Center(child: CircularProgressIndicator()),
+            )
+          : Row(
+              children: [
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      IconButton(
-                        icon: const Icon(
-                          Icons.reply_rounded,
-                          color: Colors.white,
-                          size: 26,
-                        ),
-                        onPressed: () {},
+                      const Text(
+                        "Today's Tasks",
+                        style: TextStyle(fontSize: 15, color: Colors.black54),
                       ),
-                      Positioned(
-                        top: 6,
-                        right: 6,
-                        child: Container(
-                          width: 18,
-                          height: 18,
-                          decoration: const BoxDecoration(
-                            color: Colors.red,
-                            shape: BoxShape.circle,
-                          ),
-                          child: const Center(
-                            child: Text(
-                              '3',
-                              style: TextStyle(
-                                fontFamily: 'Inter',
-                                fontSize: 11,
-                                fontWeight: FontWeight.w700,
-                                color: Colors.white,
-                              ),
-                            ),
-                          ),
+                      const SizedBox(height: 4),
+                      Text(
+                        '$total',
+                        style: const TextStyle(
+                          fontSize: 46,
+                          height: 1,
+                          fontWeight: FontWeight.w700,
+                          color: AppColors.navy,
+                        ),
+                      ),
+                      const SizedBox(height: 8),
+                      Text(
+                        '$completed completed today',
+                        style: const TextStyle(
+                          color: Color(0xFFF3A523),
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                     ],
                   ),
-                ],
-              ),
+                ),
+                SizedBox(
+                  width: 120,
+                  height: 120,
+                  child: Stack(
+                    alignment: Alignment.center,
+                    children: [
+                      SizedBox(
+                        width: 108,
+                        height: 108,
+                        child: CircularProgressIndicator(
+                          value: progress,
+                          strokeWidth: 13,
+                          backgroundColor: Colors.grey.shade200,
+                          valueColor: const AlwaysStoppedAnimation(
+                            AppColors.navy,
+                          ),
+                        ),
+                      ),
+                      Column(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Text(
+                            '$completed/$total',
+                            style: const TextStyle(
+                              fontWeight: FontWeight.w700,
+                              color: AppColors.navy,
+                            ),
+                          ),
+                          const Text(
+                            'Done',
+                            style: TextStyle(
+                              fontSize: 11,
+                              color: Colors.black54,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ],
             ),
+    );
+  }
+}
+
+class _DriverHeader extends StatelessWidget {
+  const _DriverHeader();
+
+  @override
+  Widget build(BuildContext context) {
+    final profile = context.watch<DriverController>().profile;
+    return Container(
+      height: 160,
+      padding: EdgeInsets.fromLTRB(
+        24,
+        MediaQuery.of(context).padding.top + 18,
+        24,
+        22,
+      ),
+      decoration: const BoxDecoration(
+        color: AppColors.navy,
+        borderRadius: BorderRadius.only(
+          bottomLeft: Radius.circular(34),
+          bottomRight: Radius.circular(34),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisAlignment: MainAxisAlignment.end,
+              children: [
+                const Text(
+                  "Today's Summary",
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 25,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+                const SizedBox(height: 5),
+                Text(
+                  profile?.fullName.isNotEmpty == true
+                      ? 'Welcome, ${profile!.fullName}'
+                      : 'Your assigned delivery tasks',
+                  style: const TextStyle(color: Colors.white70),
+                ),
+              ],
+            ),
+          ),
+          const Icon(
+            Icons.local_shipping_outlined,
+            color: Color(0xFFF3A523),
+            size: 42,
           ),
         ],
       ),
@@ -407,24 +315,28 @@ class _MyTasksHeader extends StatelessWidget {
   }
 }
 
-class _MyTasksWavePainter extends CustomPainter {
-  final Color waveColor;
-  _MyTasksWavePainter({required this.waveColor});
+class _DriverError extends StatelessWidget {
+  final String message;
+  final VoidCallback onRetry;
+
+  const _DriverError({required this.message, required this.onRetry});
 
   @override
-  void paint(Canvas canvas, Size size) {
-    final paint = Paint()..color = waveColor;
-    final path = Path();
-    path.moveTo(0, size.height);
-    path.quadraticBezierTo(0, 0, size.width * 0.20, 0);
-    path.lineTo(size.width * 0.85, 0);
-    path.quadraticBezierTo(size.width, 0, size.width, -size.height * 0.85);
-    path.lineTo(size.width, size.height);
-    path.close();
-    canvas.drawPath(path, paint);
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            const Icon(Icons.error_outline, color: Colors.redAccent, size: 42),
+            const SizedBox(height: 10),
+            Text(message, textAlign: TextAlign.center),
+            const SizedBox(height: 12),
+            ElevatedButton(onPressed: onRetry, child: const Text('Retry')),
+          ],
+        ),
+      ),
+    );
   }
-
-  @override
-  bool shouldRepaint(covariant _MyTasksWavePainter oldDelegate) =>
-      oldDelegate.waveColor != waveColor;
 }

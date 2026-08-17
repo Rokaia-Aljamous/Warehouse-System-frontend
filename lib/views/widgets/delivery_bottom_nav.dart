@@ -15,7 +15,7 @@ class DeliveryBottomNav extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final width = MediaQuery.of(context).size.width - 40;
-    final double tabWidth = width / 5;
+    final double tabWidth = width / 4;
     final double targetCenterX = (currentIndex * tabWidth) + (tabWidth / 2);
 
     return Container(
@@ -53,11 +53,9 @@ class DeliveryBottomNav extends StatelessWidget {
                   mainAxisAlignment: MainAxisAlignment.spaceAround,
                   children: [
                     _buildNavItem(0, Icons.home_filled),
-                    _buildNavItem(1, Icons.location_on_outlined),
-                    _buildNavItem(2, Icons.inventory_2_outlined),
-                    // تم تحديث الأيقونة لتصبح سهم الإرجاع المطلوب
+                    _buildNavItem(1, Icons.person_outline),
+                    _buildNavItem(2, Icons.task_alt_outlined),
                     _buildNavItem(3, Icons.reply_rounded),
-                    _buildNavItem(4, Icons.person_outline),
                   ],
                 ),
               ),
