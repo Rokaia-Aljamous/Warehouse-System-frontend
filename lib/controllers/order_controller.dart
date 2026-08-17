@@ -120,6 +120,21 @@ class OrderController extends ChangeNotifier {
   String? completeError;
   List<RemainingItem> remainingItems = [];
 
+  // ---- حالة مسح الأقسام (Sections) — "مكان المنتج" ----
+  // القسم آخر ما انمسح بنجاح (يُعرض بكرت القسم بأعلى الشاشة). ملاحظة:
+  // ما منقفل الأقسام السابقة لما ينمسح قسم جديد — unlockedProductIds
+  // تراكمية عبر كل الجلسة (منتجات كل الأقسام يلي انمسحت لهلق تضل مفعّلة).
+  TaskSection? activeSection;
+  final Set<int> unlockedProductIds = {};
+  String? sectionScanError;
+
+  // هل عنصر معين مسموح مسحه حاليًا؟ (يعني قسمه انمسح قبل شوي).
+  // لو المنتج ما إله productId (حالة نادرة)، بيضل مقفول بقصد.
+  bool isItemUnlocked(TaskOrderItem item) {
+    final id = item.productId;
+    return id != null && unlockedProductIds.contains(id);
+  }
+
   // ============================================================
   // 1) جلب قائمة مهام "التحضير" — Order preparation
   // ============================================================
@@ -322,7 +337,11 @@ class OrderController extends ChangeNotifier {
   // taskId: يلزم لعمليات scan/complete لاحقًا (نفس شاشة order_details).
   // orderId: هو task.related_id من قائمة المهام (Order ID ≠ Task ID).
   // ============================================================
-  Future<bool> fetchOrderPreparationDetails(int taskId, int orderId) async {
+  Future<bool> fetchOrderPreparationDetails(
+    int taskId,
+    int orderId, {
+    TaskStatus? knownStatus,
+  }) async {
     _currentOrderId = orderId;
     isLoadingDetails = true;
     detailsError = null;
@@ -336,7 +355,7 @@ class OrderController extends ChangeNotifier {
       final data = result['data'] as Map<String, dynamic>;
       currentTask = TaskDetail.fromOrderJson(
         data,
-        task: WorkerTask(id: taskId, relatedId: orderId),
+        task: WorkerTask(id: taskId, relatedId: orderId, status: knownStatus),
       );
       isDetailsFromCache = false;
       detailsError = null;
@@ -353,7 +372,7 @@ class OrderController extends ChangeNotifier {
       if (cached != null) {
         currentTask = TaskDetail.fromOrderJson(
           cached,
-          task: WorkerTask(id: taskId, relatedId: orderId),
+          task: WorkerTask(id: taskId, relatedId: orderId, status: knownStatus),
         );
         isDetailsFromCache = true;
         detailsError = null;
@@ -373,7 +392,11 @@ class OrderController extends ChangeNotifier {
   // taskId: يلزم لعمليات scan/complete لاحقًا (نفس شاشة receiving_details).
   // shipmentId: هو task.related_id من قائمة المهام (Shipment ID ≠ Task ID).
   // ============================================================
-  Future<bool> fetchReceivingDetails(int taskId, int shipmentId) async {
+  Future<bool> fetchReceivingDetails(
+    int taskId,
+    int shipmentId, {
+    TaskStatus? knownStatus,
+  }) async {
     _currentShipmentId = shipmentId;
     isLoadingDetails = true;
     detailsError = null;
@@ -387,7 +410,7 @@ class OrderController extends ChangeNotifier {
       final data = result['data'] as Map<String, dynamic>;
       currentTask = TaskDetail.fromShipmentJson(
         data,
-        task: WorkerTask(id: taskId, relatedId: shipmentId),
+        task: WorkerTask(id: taskId, relatedId: shipmentId, status: knownStatus),
       );
       isDetailsFromCache = false;
       detailsError = null;
@@ -404,7 +427,7 @@ class OrderController extends ChangeNotifier {
       if (cached != null) {
         currentTask = TaskDetail.fromShipmentJson(
           cached,
-          task: WorkerTask(id: taskId, relatedId: shipmentId),
+          task: WorkerTask(id: taskId, relatedId: shipmentId, status: knownStatus),
         );
         isDetailsFromCache = true;
         detailsError = null;
@@ -424,7 +447,11 @@ class OrderController extends ChangeNotifier {
   // taskId: يلزم لعمليات scan/complete لاحقًا (نفس شاشة recovery_details).
   // returnId: هو task.related_id من قائمة المهام (Return ID ≠ Task ID).
   // ============================================================
-  Future<bool> fetchReturnDetails(int taskId, int returnId) async {
+  Future<bool> fetchReturnDetails(
+    int taskId,
+    int returnId, {
+    TaskStatus? knownStatus,
+  }) async {
     _currentReturnId = returnId;
     isLoadingDetails = true;
     detailsError = null;
@@ -438,7 +465,7 @@ class OrderController extends ChangeNotifier {
       final data = result['data'] as Map<String, dynamic>;
       currentTask = TaskDetail.fromReturnJson(
         data,
-        task: WorkerTask(id: taskId, relatedId: returnId),
+        task: WorkerTask(id: taskId, relatedId: returnId, status: knownStatus),
       );
       isDetailsFromCache = false;
       detailsError = null;
@@ -455,7 +482,7 @@ class OrderController extends ChangeNotifier {
       if (cached != null) {
         currentTask = TaskDetail.fromReturnJson(
           cached,
-          task: WorkerTask(id: taskId, relatedId: returnId),
+          task: WorkerTask(id: taskId, relatedId: returnId, status: knownStatus),
         );
         isDetailsFromCache = true;
         detailsError = null;
@@ -504,6 +531,74 @@ class OrderController extends ChangeNotifier {
       }
     }
     return false;
+  }
+
+  // ============================================================
+  // 2-هـ) مسح باركود قسم — لازم يُمسح قسم منتج أول قبل ما يقدر العامل
+  // يمسح منتجاته. نفس /scan endpoint العادي (Api.taskScan) بيميّز
+  // تلقائيًا هل الباركود الممسوح قسم أو منتج ويرجع شكل رد مختلف.
+  // (بدون دعم أوفلاين لهلق بقصد — هاي أول نسخة أونلاين بس).
+  // ============================================================
+  Future<ScanOutcome> scanSectionBarcode(int taskId, String barcode) async {
+    sectionScanError = null;
+    notifyListeners();
+
+    final result = await _taskService.scanBarcode(taskId, barcode);
+
+    if (result['success'] != true) {
+      sectionScanError =
+          result['message']?.toString() ?? 'Failed to scan section';
+      notifyListeners();
+      return ScanOutcome.error;
+    }
+
+    final data = result['data'] as Map<String, dynamic>;
+    // ignore: avoid_print
+    debugPrint('[scanSectionBarcode] raw response: $data');
+
+    final scanResult = ScanResult.fromJson(data);
+
+    if (!scanResult.isSectionScan) {
+      // الباركود الممسوح كان تبع منتج مش قسم — منوضح للمستخدم بدل ما
+      // نطبّق تحديث غلط.
+      sectionScanError = 'This barcode belongs to a product, not a section';
+      notifyListeners();
+      return ScanOutcome.notMatched;
+    }
+
+    activeSection = scanResult.section;
+
+    final newIds = scanResult.sectionProducts
+        .map((p) => p.productId)
+        .where((id) => id != 0)
+        .toSet();
+
+    // ignore: avoid_print
+    debugPrint(
+      '[scanSectionBarcode] section="${scanResult.section?.name}" '
+      'productsInSectionResponse=${scanResult.sectionProducts.length} '
+      'newProductIds=$newIds '
+      'currentTaskItemProductIds=${currentTask?.items.map((i) => i.productId).toList()}',
+    );
+
+    if (newIds.isEmpty) {
+      // القسم انمسح ونجح، بس السيرفر ما رجع ولا منتج مرتبط فيه — هاد على
+      // الأغلب معناه المنتج مش معيّن (assigned) لهاد القسم من طرف الباك إند
+      // (لوحة المدير > Sections > Assign Product to Section)، مش خطأ
+      // بالفلاتر. منوضحها صراحة بدل ما نخلي المستخدم يحتار.
+      sectionScanError =
+          'Section "${scanResult.section?.name}" matched, but the backend '
+          'returned no products for it. Check the product↔section '
+          'assignment on the dashboard.';
+      notifyListeners();
+      return ScanOutcome.success;
+    }
+
+    unlockedProductIds.addAll(newIds);
+
+    sectionScanError = null;
+    notifyListeners();
+    return ScanOutcome.success;
   }
 
   // ============================================================
@@ -719,6 +814,9 @@ class OrderController extends ChangeNotifier {
     _currentOrderId = null;
     _currentShipmentId = null;
     _currentReturnId = null;
+    activeSection = null;
+    unlockedProductIds.clear();
+    sectionScanError = null;
   }
 }
 

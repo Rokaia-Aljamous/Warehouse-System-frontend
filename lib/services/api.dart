@@ -4,7 +4,7 @@ class Api {
   // - على جهاز حقيقي أو iOS Simulator: استخدمي الـ IP المحلي لجهاز الكمبيوتر (مثلاً 192.168.1.x)
   // - لو السيرفر أونلاين: حطي الدومين الحقيقي
   // عدّلي هذا السطر:
-  static const String baseUrl = "http://10.150.80.86:8000";
+  static const String baseUrl = "http://10.65.1.21:8000";
 
   static const String login = "/api/workers/login";
   static const String forgotPassword = "/api/workers/password/forgot";
@@ -35,7 +35,8 @@ class Api {
   // ---- Returns / Recovery (خاص فقط بمهام task_type = restock_product) ----
   // نفس المبدأ بالظبط: تفاصيل المرتجع بتيجي عن طريق related_id (Return ID)
   // مش Task ID. Task ID بيضل يستخدم فقط لـ scan/complete فوق.
-  static String returnDetails(int returnId) => "/api/workers/returns/$returnId";
+  static String returnDetails(int returnId) =>
+      "/api/workers/returns/$returnId";
 
   // ---- Disposals (طلبات إتلاف مستقلة عن الـ Tasks) ----
   // POST disposals: {"barcode": "...", "quantity": 1, "damage_reason": "..."}

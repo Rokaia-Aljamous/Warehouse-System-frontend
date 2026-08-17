@@ -162,6 +162,7 @@ class _RecoveryScreenState extends State<RecoveryScreen> {
                                 builder: (context) => RecoveryDetailsScreen(
                                   taskId: task.id,
                                   returnId: task.relatedId!,
+                                  initialStatus: task.status,
                                 ),
                               ),
                             ).then((_) => _refresh());
@@ -280,17 +281,6 @@ class _TaskCard extends StatelessWidget {
               color: Colors.black,
             ),
           ),
-          const SizedBox(height: 2),
-          if (task.relatedStatus != null)
-            Text(
-              task.relatedStatus!,
-              style: const TextStyle(
-                fontFamily: 'Inter',
-                fontSize: 15,
-                fontWeight: FontWeight.w400,
-                color: Colors.black87,
-              ),
-            ),
           const SizedBox(height: 6),
           Row(
             mainAxisAlignment: MainAxisAlignment.spaceBetween,

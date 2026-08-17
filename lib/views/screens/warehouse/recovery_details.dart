@@ -18,14 +18,22 @@ import '../../../models/order_model.dart';
 import '../../../utils/constants.dart';
 import '../../../views/widgets/auth_widgets.dart';
 import '../../../views/widgets/barcode_scanner_sheet.dart';
+import '../../../views/widgets/section_scan_card.dart';
 
 class RecoveryDetailsScreen extends StatefulWidget {
   final int taskId;
   final int returnId;
+  // حالة التاسك الحقيقية (WorkerTask.status) — جاية من شاشة قائمة المهام
+  // (Recovery). لازم تنمرر لأنه GET /workers/returns/{returnId} ما بيرجّع
+  // حالة التاسك نفسه أبدًا (بيرجّع بس حالة الـ Return)، فبدون هاد
+  // الباراميتر isCompleted بتضل false دايمًا حتى لو المهمة completed
+  // فعليًا بالسيرفر.
+  final TaskStatus? initialStatus;
   const RecoveryDetailsScreen({
     super.key,
     required this.taskId,
     required this.returnId,
+    this.initialStatus,
   });
 
   @override
@@ -43,7 +51,11 @@ class _RecoveryDetailsScreenState extends State<RecoveryDetailsScreen> {
     super.initState();
     _orderController = context.read<OrderController>();
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _orderController.fetchReturnDetails(widget.taskId, widget.returnId);
+      _orderController.fetchReturnDetails(
+        widget.taskId,
+        widget.returnId,
+        knownStatus: widget.initialStatus,
+      );
     });
   }
 
@@ -86,6 +98,28 @@ class _RecoveryDetailsScreenState extends State<RecoveryDetailsScreen> {
         backgroundColor: isError ? Colors.redAccent : AppColors.navy,
       ),
     );
+  }
+
+  Future<void> _handleScanSection() async {
+    final controller = context.read<OrderController>();
+
+    final barcode = await Navigator.push<String>(
+      context,
+      MaterialPageRoute(builder: (_) => const BarcodeScannerScreen()),
+    );
+
+    if (barcode == null || !mounted) return;
+
+    final outcome = await controller.scanSectionBarcode(widget.taskId, barcode);
+
+    if (!mounted) return;
+
+    if (outcome != ScanOutcome.success) {
+      _showSnack(
+        controller.sectionScanError ?? 'Failed to scan section',
+        isError: true,
+      );
+    }
   }
 
   Future<void> _handleComplete() async {
@@ -249,6 +283,7 @@ class _RecoveryDetailsScreenState extends State<RecoveryDetailsScreen> {
                             onPressed: () => controller.fetchReturnDetails(
                               widget.taskId,
                               widget.returnId,
+                              knownStatus: widget.initialStatus,
                             ),
                             child: const Text('Retry'),
                           ),
@@ -262,6 +297,9 @@ class _RecoveryDetailsScreenState extends State<RecoveryDetailsScreen> {
                 if (task == null) return const SizedBox.shrink();
 
                 final allScanned = task.allItemsComplete;
+                // المهمة completed أصلاً (فُتحت من الأرشيف مثلاً) —
+                // عرض فقط: القسم وكل المنتجات خضراء ومقفولة عن التعديل.
+                final isTaskCompleted = task.isCompleted;
 
                 return Transform.translate(
                   offset: const Offset(0, -40),
@@ -274,10 +312,13 @@ class _RecoveryDetailsScreenState extends State<RecoveryDetailsScreen> {
                           child: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              if (!allScanned) ...[
-                                _InfoCard(task: task, taskId: widget.taskId),
-                                const SizedBox(height: 24),
-                              ],
+                              _InfoCard(task: task, taskId: widget.taskId),
+                              const SizedBox(height: 24),
+                              SectionScanCard(
+                                activeSectionName: controller.activeSection?.name,
+                                onScan: _handleScanSection,
+                                isReadOnly: isTaskCompleted,
+                              ),
                               const Padding(
                                 padding: EdgeInsets.only(left: 8.0),
                                 child: Text(
@@ -296,6 +337,8 @@ class _RecoveryDetailsScreenState extends State<RecoveryDetailsScreen> {
                                 (item) => _ProductScanCard(
                                   item: item,
                                   onScan: () => _handleScan(item),
+                                  isLocked: !controller.isItemUnlocked(item),
+                                  isReadOnly: isTaskCompleted,
                                 ),
                               ),
                               const SizedBox(height: 16),
@@ -307,15 +350,17 @@ class _RecoveryDetailsScreenState extends State<RecoveryDetailsScreen> {
                         padding: const EdgeInsets.only(bottom: 24.0, top: 8.0),
                         child: Center(
                           child: GestureDetector(
-                            onTap: (allScanned && !controller.isCompleting)
+                            onTap: (!isTaskCompleted &&
+                                    allScanned &&
+                                    !controller.isCompleting)
                                 ? _handleComplete
                                 : null,
                             child: AnimatedContainer(
                               duration: const Duration(milliseconds: 300),
-                              width: allScanned ? 180 : 160,
+                              width: (allScanned || isTaskCompleted) ? 180 : 160,
                               height: 50,
                               decoration: BoxDecoration(
-                                color: allScanned
+                                color: (allScanned || isTaskCompleted)
                                     ? const Color(0xFFBBF7D0)
                                     : AppColors.white,
                                 borderRadius: BorderRadius.circular(12),
@@ -336,19 +381,19 @@ class _RecoveryDetailsScreenState extends State<RecoveryDetailsScreen> {
                                       mainAxisSize: MainAxisSize.min,
                                       children: [
                                         Text(
-                                          'Confirm',
+                                          isTaskCompleted ? 'Completed' : 'Confirm',
                                           style: TextStyle(
                                             fontFamily: 'Inter',
                                             fontSize: 18,
                                             fontWeight: FontWeight.w600,
-                                            color: allScanned
+                                            color: (allScanned || isTaskCompleted)
                                                 ? const Color(0xFF2E7D32)
                                                 : AppColors.navy,
                                           ),
                                         ),
                                         const SizedBox(width: 8),
                                         Icon(
-                                          allScanned
+                                          (allScanned || isTaskCompleted)
                                               ? Icons.check_circle_outline
                                               : Icons.verified_outlined,
                                           color: AppColors.navy,
@@ -479,8 +524,17 @@ class _InfoCard extends StatelessWidget {
 class _ProductScanCard extends StatelessWidget {
   final TaskOrderItem item;
   final VoidCallback onScan;
+  final bool isLocked;
+  // لما المهمة تكون completed أصلاً، كل منتج لازم يظهر أخضر (تم) دايمًا
+  // وما يظل مقفول (رمادي)، بس ممنوع تعديله — عرض فقط.
+  final bool isReadOnly;
 
-  const _ProductScanCard({required this.item, required this.onScan});
+  const _ProductScanCard({
+    required this.item,
+    required this.onScan,
+    this.isLocked = false,
+    this.isReadOnly = false,
+  });
 
   Color _bgColorFor(ItemScanState state) {
     switch (state) {
@@ -506,65 +560,49 @@ class _ProductScanCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = item.scanState;
+    final state = isReadOnly ? ItemScanState.done : item.scanState;
     final isDone = state == ItemScanState.done;
+    // بوضع العرض فقط ما منقفل الكرت (رمادي) أبداً — لازم يظهر أخضر "تم"
+    // بدل رمادي "مقفول"، بس onTap تحت بيضل معطّل لأنه isDone صار true.
+    final locked = isReadOnly ? false : isLocked;
 
     return Container(
       margin: const EdgeInsets.only(bottom: 16),
       width: double.infinity,
       decoration: BoxDecoration(
-        color: AppColors.white,
+        color: locked ? Colors.grey.shade200 : AppColors.white,
         borderRadius: BorderRadius.circular(16),
         border: Border.all(color: Colors.black26, width: 1.0),
       ),
       padding: const EdgeInsets.all(16),
-      child: Row(
-        children: [
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  item.productName,
-                  style: const TextStyle(
-                    fontFamily: 'Inter',
-                    fontSize: 22,
-                    fontWeight: FontWeight.w600,
-                    color: AppColors.navy,
+      child: Opacity(
+        opacity: locked ? 0.5 : 1.0,
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.productName,
+                    style: const TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 22,
+                      fontWeight: FontWeight.w600,
+                      color: AppColors.navy,
+                    ),
                   ),
-                ),
-                const SizedBox(height: 6),
-                Row(
-                  children: [
-                    const Icon(
-                      Icons.layers_outlined,
-                      size: 18,
-                      color: Colors.black54,
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      'Restocked: ${item.pickedQty} / ${item.expectedQty}',
-                      style: const TextStyle(
-                        fontFamily: 'Inter',
-                        fontSize: 15,
-                        fontWeight: FontWeight.w500,
-                        color: Colors.black87,
-                      ),
-                    ),
-                  ],
-                ),
-                if (item.brand != null) ...[
-                  const SizedBox(height: 4),
+                  const SizedBox(height: 6),
                   Row(
                     children: [
                       const Icon(
-                        Icons.sell_outlined,
+                        Icons.layers_outlined,
                         size: 18,
                         color: Colors.black54,
                       ),
                       const SizedBox(width: 8),
                       Text(
-                        item.brand!,
+                        'Restocked: ${item.pickedQty} / ${item.expectedQty}',
                         style: const TextStyle(
                           fontFamily: 'Inter',
                           fontSize: 15,
@@ -574,36 +612,60 @@ class _ProductScanCard extends StatelessWidget {
                       ),
                     ],
                   ),
+                  if (item.brand != null) ...[
+                    const SizedBox(height: 4),
+                    Row(
+                      children: [
+                        const Icon(
+                          Icons.sell_outlined,
+                          size: 18,
+                          color: Colors.black54,
+                        ),
+                        const SizedBox(width: 8),
+                        Text(
+                          item.brand!,
+                          style: const TextStyle(
+                            fontFamily: 'Inter',
+                            fontSize: 15,
+                            fontWeight: FontWeight.w500,
+                            color: Colors.black87,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ],
                 ],
-              ],
-            ),
-          ),
-          GestureDetector(
-            onTap: isDone ? null : onScan,
-            child: AnimatedContainer(
-              duration: const Duration(milliseconds: 250),
-              width: 54,
-              height: 54,
-              decoration: BoxDecoration(
-                color: _bgColorFor(state),
-                borderRadius: BorderRadius.circular(12),
-                border: isDone
-                    ? Border.all(
-                        color: const Color(0xFF4CAF50).withOpacity(0.5),
-                        width: 1.5,
-                      )
-                    : null,
-              ),
-              child: Icon(
-                isDone
-                    ? Icons.check_circle_outline_rounded
-                    : Icons.qr_code_scanner_rounded,
-                color: _iconColorFor(state),
-                size: 28,
               ),
             ),
-          ),
-        ],
+            GestureDetector(
+              onTap: (isDone || locked) ? null : onScan,
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 250),
+                width: 54,
+                height: 54,
+                decoration: BoxDecoration(
+                  color: locked ? Colors.grey.shade300 : _bgColorFor(state),
+                  borderRadius: BorderRadius.circular(12),
+                  border: isDone
+                      ? Border.all(
+                          color: const Color(0xFF4CAF50).withOpacity(0.5),
+                          width: 1.5,
+                        )
+                      : null,
+                ),
+                child: Icon(
+                  locked
+                      ? Icons.lock_outline_rounded
+                      : (isDone
+                          ? Icons.check_circle_outline_rounded
+                          : Icons.qr_code_scanner_rounded),
+                  color: locked ? Colors.black45 : _iconColorFor(state),
+                  size: 28,
+                ),
+              ),
+            ),
+          ],
+        ),
       ),
     );
   }

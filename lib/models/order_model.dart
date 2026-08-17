@@ -369,6 +369,13 @@ class TaskDetail {
   bool get allItemsComplete =>
       items.isNotEmpty && items.every((i) => i.isComplete);
 
+  // المهمة نفسها (على مستوى الـ backend) صارت completed — لما يصير هيك
+  // الشاشة لازم تفتح بوضع "عرض فقط": القسم وكل المنتجات تظهر خضراء
+  // ومقفولة عن التعديل، وزر Confirm بيصير معطّل. هاد مستقل عن
+  // allItemsComplete (يلي بيحسب من العناصر المحليّة وممكن يكون قديم/غير
+  // مطابق تمامًا لو الأدمن كمّل المهمة يدويًا).
+  bool get isCompleted => task.status == TaskStatus.completed;
+
   // ============================================================
   // تفاصيل مهمة "تحضير طلب" فقط — GET /workers/orders/{orderId}
   // بنية مختلفة تمامًا عن fromJson العامة فوق: مافي "task"/"related" wrapper،
@@ -490,6 +497,53 @@ class TaskDetail {
   }
 }
 
+// ============================================================
+// قسم (Section/Department) — "مكان المنتج" الفعلي بالمستودع. كل منتج
+// تابع لقسم معين، ولكل قسم باركود خاص فيه. لازم يُمسح باركود القسم
+// أول قبل ما تنمسح منتجاته (نفس /scan endpoint العادي بيميّز تلقائياً
+// هل الباركود الممسوح هو قسم أو منتج، ويرجع شكل رد مختلف حسب النوع).
+// ============================================================
+class TaskSection {
+  final int id;
+  final String name;
+  final String? barcode;
+
+  const TaskSection({required this.id, required this.name, this.barcode});
+
+  factory TaskSection.fromJson(Map<String, dynamic> j) => TaskSection(
+    id: (j['id'] as num?)?.toInt() ?? (j['section_id'] as num?)?.toInt() ?? 0,
+    // \r\n زوائد جايين من الباك إند (نفس ما شفنا ببيانات تانية متل brand) —
+    // .trim() بتنضفهم حتى ما يظهروا بالواجهة.
+    name: j['name']?.toString().trim() ?? '',
+    barcode: (j['section_qr_code'] ?? j['barcode'])?.toString(),
+  );
+}
+
+// منتج واحد تابع لقسم مُمسوح حديثًا — جزء من رد مسح القسم (حقل "products").
+// بيُستخدم لتحديد أي عناصر بالمهمة صارت "مفعّلة" (قابلة للمسح) بعد مسح
+// قسمها.
+class SectionProductInfo {
+  final int productId;
+  final String name;
+  final int required;
+  final int scanned;
+
+  const SectionProductInfo({
+    required this.productId,
+    required this.name,
+    required this.required,
+    required this.scanned,
+  });
+
+  factory SectionProductInfo.fromJson(Map<String, dynamic> j) =>
+      SectionProductInfo(
+        productId: (j['product_id'] as num?)?.toInt() ?? 0,
+        name: j['name']?.toString() ?? '',
+        required: (j['required'] as num?)?.toInt() ?? 0,
+        scanned: (j['scanned'] as num?)?.toInt() ?? 0,
+      );
+}
+
 class ScanResult {
   final bool matched;
   final ScanProduct? product;
@@ -497,13 +551,23 @@ class ScanResult {
   final ScanProgress? progress;
   final List<ScanProgressItem> progressItems;
 
+  // ---- خاص فقط برد "مسح قسم" (section != null) — بعكس رد مسح منتج
+  // عادي يلي بيرجع "product" + "progress" بدل هيك. نفس /scan endpoint
+  // بيرجع الشكل المناسب تلقائيًا حسب نوع الباركود الممسوح.
+  final TaskSection? section;
+  final List<SectionProductInfo> sectionProducts;
+
   const ScanResult({
     required this.matched,
     this.product,
     this.warning,
     this.progress,
     required this.progressItems,
+    this.section,
+    this.sectionProducts = const [],
   });
+
+  bool get isSectionScan => section != null;
 
   factory ScanResult.fromJson(Map<String, dynamic> j) {
     final progressJson = j['progress'] is Map
@@ -516,6 +580,11 @@ class ScanResult {
       final list = j['warnings'] as List;
       if (list.isNotEmpty) warning = list.first?.toString();
     }
+
+    final sectionJson = j['section'] is Map
+        ? Map<String, dynamic>.from(j['section'] as Map)
+        : null;
+    final sectionProductsJson = j['products'];
 
     return ScanResult(
       matched: j['matched'] == true,
@@ -531,6 +600,14 @@ class ScanResult {
                   (e) =>
                       ScanProgressItem.fromJson(Map<String, dynamic>.from(e)),
                 )
+                .toList()
+          : [],
+      section: sectionJson != null ? TaskSection.fromJson(sectionJson) : null,
+      sectionProducts: sectionProductsJson is List
+          ? sectionProductsJson
+                .whereType<Map>()
+                .map((e) =>
+                    SectionProductInfo.fromJson(Map<String, dynamic>.from(e)))
                 .toList()
           : [],
     );
