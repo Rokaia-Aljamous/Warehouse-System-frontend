@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "512532553109",
+    "project_id": "warehouse-8f31a",
+    "storage_bucket": "warehouse-8f31a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:512532553109:android:ba78341ea49e917824aa9c",
+        "android_client_info": {
+          "package_name": "com.example.stock_app"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyD1tliYkvGB_V6oRvNIiDW6KNnL1MIZQ4w"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

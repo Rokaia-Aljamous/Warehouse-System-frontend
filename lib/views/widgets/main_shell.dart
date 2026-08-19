@@ -1,6 +1,8 @@
 // lib/views/widgets/main_shell.dart
 
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:stock_app/controllers/driver_notification_controller.dart';
 import 'package:stock_app/views/screens/common/edit_profile_screen.dart';
 import 'package:stock_app/views/screens/common/profile_screen.dart';
 import 'package:stock_app/views/screens/warehouse/MyTasksScreen.dart';
@@ -20,17 +22,27 @@ class MainShell extends StatefulWidget {
 class _MainShellState extends State<MainShell> {
   int _currentIndex = 0;
 
+  late final DriverNotificationController _notificationController;
   late List<Widget> _pages;
 
   @override
   void initState() {
     super.initState();
+    _notificationController = DriverNotificationController()..initialize();
     _pages = [
-      const WarehouseHome(), // index 0 — Home
+      WarehouseHome(
+        notificationController: _notificationController,
+      ), // index 0 — Home
       const MyTaskScreen(), // index 1 — My Tasks
       ProfileScreen(onEditProfile: () => _changePage(3)), // index 2 — Profile
       EditProfileScreen(onBack: () => _changePage(2)), // index 3 — Edit Profile
     ];
+  }
+
+  @override
+  void dispose() {
+    _notificationController.dispose();
+    super.dispose();
   }
 
   void _changePage(int index) {
@@ -41,17 +53,20 @@ class _MainShellState extends State<MainShell> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      extendBody: true,
-      body: IndexedStack(index: _currentIndex, children: _pages),
-      // إذا كان المستخدم في صفحة Edit (3) نُفعّل أيقونة Profile (2)
-      bottomNavigationBar: CustomBottomNav(
-        currentIndex: _currentIndex == 3 ? 2 : _currentIndex,
-        onTap: (index) {
-          setState(() {
-            _currentIndex = index;
-          });
-        },
+    return ChangeNotifierProvider.value(
+      value: _notificationController,
+      child: Scaffold(
+        extendBody: true,
+        body: IndexedStack(index: _currentIndex, children: _pages),
+        // إذا كان المستخدم في صفحة Edit (3) نُفعّل أيقونة Profile (2)
+        bottomNavigationBar: CustomBottomNav(
+          currentIndex: _currentIndex == 3 ? 2 : _currentIndex,
+          onTap: (index) {
+            setState(() {
+              _currentIndex = index;
+            });
+          },
+        ),
       ),
     );
   }

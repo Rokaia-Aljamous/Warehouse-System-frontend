@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:stock_app/controllers/driver_notification_controller.dart';
 import 'package:stock_app/views/screens/warehouse/ReceivingScreen.dart';
 import 'package:stock_app/views/screens/warehouse/PreparingScreen.dart';
 import 'package:stock_app/views/screens/warehouse/RecoveryScreen.dart';
@@ -8,7 +9,9 @@ import 'package:stock_app/views/screens/common/notification_screen.dart';
 import '../../../utils/constants.dart';
 
 class WarehouseHome extends StatelessWidget {
-  const WarehouseHome({super.key});
+  final DriverNotificationController notificationController;
+
+  const WarehouseHome({super.key, required this.notificationController});
 
   static const List<_HomeItem> _items = [
     _HomeItem(label: 'Processing', icon: Icons.inventory_2_outlined),
@@ -69,13 +72,19 @@ class WarehouseHome extends StatelessWidget {
 
                     // زر الإشعارات
                     IconButton(
-                      onPressed: () {
-                        Navigator.push(
+                      onPressed: () async {
+                        await notificationController.refresh();
+                        if (!context.mounted) return;
+
+                        await Navigator.push(
                           context,
                           MaterialPageRoute(
-                            builder: (_) => const NotificationScreen(),
+                            builder: (_) => NotificationScreen(
+                              driverController: notificationController,
+                            ),
                           ),
                         );
+                        await notificationController.refresh();
                       },
                       icon: const Icon(
                         Icons.notifications_none_rounded,

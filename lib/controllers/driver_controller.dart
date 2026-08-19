@@ -32,6 +32,14 @@ class DriverController extends ChangeNotifier {
 
   List<DriverTask> get allTasks => [...pendingTasks, ...completedTasks];
 
+  List<DriverTask> get pendingReturnTasks => pendingTasks
+      .where((task) => task.type == DriverTaskType.returnPickup)
+      .toList();
+
+  List<DriverTask> get completedReturnTasks => completedTasks
+      .where((task) => task.type == DriverTaskType.returnPickup)
+      .toList();
+
   Future<void> initialize() async {
     isInitializing = true;
     notifyListeners();
@@ -94,7 +102,58 @@ class DriverController extends ChangeNotifier {
     final body = Map<String, dynamic>.from(result['data'] as Map);
     final taskJson = body['task'];
     if (taskJson is! Map) return null;
-    return DriverTask.fromJson(Map<String, dynamic>.from(taskJson));
+    var task = DriverTask.fromJson(Map<String, dynamic>.from(taskJson));
+
+    // The return details endpoint uses task.related_id as Return ID. It is the
+    // authoritative source for return metadata and returned items.
+    if (task.type == DriverTaskType.returnPickup && task.relatedId != null) {
+      final returnResult = await _taskService.getReturnDetails(task.relatedId!);
+      if (returnResult['success'] == true) {
+        final returnBody = returnResult['data'];
+        if (returnBody is Map && returnBody['return'] is Map) {
+          task = task.withReturnDetails(
+            Map<String, dynamic>.from(returnBody['return'] as Map),
+          );
+        }
+      }
+    }
+
+    // Return pickup tasks point to Return_, while the customer and destination
+    // coordinates live on the original Order. The backend exposes order_id on
+    // the task and GET /workers/orders/{orderId}, so enrich without guessing.
+    final orderId = task.orderId;
+    if (orderId != null &&
+        (task.type == DriverTaskType.returnPickup ||
+            task.customerName == null ||
+            !task.hasCoordinates)) {
+      final orderResult = await _taskService.getOrderDetails(orderId);
+      if (orderResult['success'] == true) {
+        final orderBody = orderResult['data'];
+        if (orderBody is Map && orderBody['order'] is Map) {
+          task = task.withOrderDetails(
+            Map<String, dynamic>.from(orderBody['order'] as Map),
+          );
+        }
+      }
+    }
+
+    return task;
+  }
+
+  Future<Map<String, dynamic>> scanTaskBarcode({
+    required int taskId,
+    required String barcode,
+  }) async {
+    final result = await _taskService.scanTaskBarcode(
+      taskId: taskId,
+      barcode: barcode,
+    );
+
+    if (result['success'] == true) {
+      await Future.wait([fetchTasks(), fetchDailySummary()]);
+    }
+
+    return result;
   }
 
   Future<void> fetchProfile() async {

@@ -35,9 +35,9 @@ class _DriverTaskDetailsScreenState extends State<DriverTaskDetailsScreen> {
     });
   }
 
-  void _start(DriverTask task) {
+  Future<void> _start(DriverTask task) async {
     final controller = context.read<DriverController>();
-    Navigator.push(
+    final completed = await Navigator.push<bool>(
       context,
       MaterialPageRoute(
         builder: (_) => ChangeNotifierProvider.value(
@@ -46,6 +46,11 @@ class _DriverTaskDetailsScreenState extends State<DriverTaskDetailsScreen> {
         ),
       ),
     );
+
+    if (completed == true) {
+      await controller.refreshAll();
+      if (mounted) Navigator.pop(context, true);
+    }
   }
 
   @override

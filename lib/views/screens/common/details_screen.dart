@@ -1,4 +1,7 @@
 import 'package:flutter/material.dart';
+import 'package:provider/provider.dart';
+import 'package:stock_app/controllers/driver_notification_controller.dart';
+import 'package:stock_app/providers/auth_provider.dart';
 import 'package:stock_app/utils/constants.dart';
 import 'package:stock_app/views/screens/common/profile_screen.dart';
 import 'package:stock_app/views/screens/common/notification_screen.dart';
@@ -60,20 +63,34 @@ class DetailsScreen extends StatelessWidget {
                 _DetailsTile(
                   icon: Icons.notifications_none_rounded,
                   label: 'Notifications',
-                  onTap: () {
-                    Navigator.push(
+                  onTap: () async {
+                    final controller = context
+                        .read<DriverNotificationController>();
+                    await controller.refresh();
+                    if (!context.mounted) return;
+
+                    await Navigator.push(
                       context,
                       MaterialPageRoute(
-                        builder: (_) => const NotificationScreen(),
+                        builder: (_) =>
+                            NotificationScreen(driverController: controller),
                       ),
                     );
+                    await controller.refresh();
                   },
                 ),
                 const SizedBox(height: 16),
                 _DetailsTile(
                   icon: Icons.logout_rounded,
                   label: 'Logout',
-                  onTap: () {
+                  onTap: () async {
+                    final notificationController = context
+                        .read<DriverNotificationController>();
+                    final authProvider = context.read<AuthProvider>();
+                    await notificationController.unregisterDevice();
+                    await authProvider.logout();
+                    if (!context.mounted) return;
+
                     Navigator.pushAndRemoveUntil(
                       context,
                       MaterialPageRoute(

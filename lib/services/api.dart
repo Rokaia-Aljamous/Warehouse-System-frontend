@@ -4,7 +4,7 @@ class Api {
   // - على جهاز حقيقي أو iOS Simulator: استخدمي الـ IP المحلي لجهاز الكمبيوتر (مثلاً 192.168.1.x)
   // - لو السيرفر أونلاين: حطي الدومين الحقيقي
   // عدّلي هذا السطر:
-  static const String baseUrl = "http://10.65.1.21:8000";
+  static const String baseUrl = "http://127.0.0.1:8000";
 
   static const String login = "/api/workers/login";
   static const String forgotPassword = "/api/workers/password/forgot";
@@ -16,6 +16,17 @@ class Api {
 
   // ---- Tasks (مهام العامل) ----
   static const String tasks = "/api/workers/tasks";
+  static const String taskSummary = "/api/workers/tasks/summary";
+  static const String driverLocation = "/api/workers/location";
+  static const String notifications = "/api/workers/notifications";
+  static const String notificationUnreadCount =
+      "/api/workers/notifications/unread-count";
+  static const String notificationReadAll =
+      "/api/workers/notifications/read-all";
+  static const String notificationDeviceToken =
+      "/api/workers/notifications/device-token";
+  static String notificationRead(int notificationId) =>
+      "/api/workers/notifications/$notificationId/read";
   static String taskDetails(int taskId) => "/api/workers/tasks/$taskId";
   static String taskScan(int taskId) => "/api/workers/tasks/$taskId/scan";
   static String taskComplete(int taskId) =>
@@ -35,8 +46,7 @@ class Api {
   // ---- Returns / Recovery (خاص فقط بمهام task_type = restock_product) ----
   // نفس المبدأ بالظبط: تفاصيل المرتجع بتيجي عن طريق related_id (Return ID)
   // مش Task ID. Task ID بيضل يستخدم فقط لـ scan/complete فوق.
-  static String returnDetails(int returnId) =>
-      "/api/workers/returns/$returnId";
+  static String returnDetails(int returnId) => "/api/workers/returns/$returnId";
 
   // ---- Disposals (طلبات إتلاف مستقلة عن الـ Tasks) ----
   // POST disposals: {"barcode": "...", "quantity": 1, "damage_reason": "..."}

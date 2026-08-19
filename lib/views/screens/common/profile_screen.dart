@@ -2,6 +2,7 @@
 
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
+import 'package:stock_app/controllers/driver_notification_controller.dart';
 import 'package:stock_app/providers/auth_provider.dart';
 import '../../../utils/constants.dart';
 import '../../widgets/auth_widgets.dart';
@@ -34,15 +35,15 @@ class _ProfileScreenState extends State<ProfileScreen> {
     setState(() => _isLoggingOut = true);
 
     final authProvider = Provider.of<AuthProvider>(context, listen: false);
+    await context.read<DriverNotificationController>().unregisterDevice();
+    if (!mounted) return;
     await authProvider.logout();
 
     if (!mounted) return;
 
     Navigator.pushAndRemoveUntil(
       context,
-      MaterialPageRoute(
-        builder: (_) => const LoginScreen(role: ''),
-      ),
+      MaterialPageRoute(builder: (_) => const LoginScreen(role: '')),
       (route) => false,
     );
   }
@@ -98,12 +99,13 @@ class _ProfileScreenState extends State<ProfileScreen> {
           CircleAvatar(
             radius: 36,
             backgroundColor: AppColors.beige,
-            backgroundImage: (auth.profileImageUrl != null &&
+            backgroundImage:
+                (auth.profileImageUrl != null &&
                     auth.profileImageUrl!.isNotEmpty)
                 ? NetworkImage(auth.profileImageUrl!)
                 : null,
-            child: (auth.profileImageUrl == null ||
-                    auth.profileImageUrl!.isEmpty)
+            child:
+                (auth.profileImageUrl == null || auth.profileImageUrl!.isEmpty)
                 ? const Icon(Icons.person, size: 36, color: AppColors.navy)
                 : null,
           ),
@@ -117,16 +119,18 @@ class _ProfileScreenState extends State<ProfileScreen> {
           else ...[
             Text(
               auth.profileFullName ?? '—',
-              style:
-                  const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
+              style: const TextStyle(fontSize: 22, fontWeight: FontWeight.bold),
             ),
             const SizedBox(height: 16),
 
             // اسم المستخدم (لا يمكن تعديله — قيد من الباك اند)
             Row(
               children: [
-                const Icon(Icons.badge_outlined,
-                    size: 20, color: Colors.black54),
+                const Icon(
+                  Icons.badge_outlined,
+                  size: 20,
+                  color: Colors.black54,
+                ),
                 const SizedBox(width: 10),
                 Text(
                   auth.profileUserName ?? '—',
@@ -139,8 +143,11 @@ class _ProfileScreenState extends State<ProfileScreen> {
             // رقم الهاتف
             Row(
               children: [
-                const Icon(Icons.phone_outlined,
-                    size: 20, color: Colors.black54),
+                const Icon(
+                  Icons.phone_outlined,
+                  size: 20,
+                  color: Colors.black54,
+                ),
                 const SizedBox(width: 10),
                 Text(
                   auth.profilePhoneNumber ?? '—',
@@ -202,14 +209,6 @@ class _ProfileScreenState extends State<ProfileScreen> {
             title: const Text("Logout"),
             trailing: const Icon(Icons.chevron_right),
             onTap: _isLoggingOut ? null : _handleLogout,
-          ),
-          ListTile(
-            leading: const Icon(Icons.delete, color: Colors.red),
-            title: const Text(
-              "Delete Account",
-              style: TextStyle(color: Colors.red),
-            ),
-            trailing: const Icon(Icons.chevron_right),
           ),
         ],
       ),

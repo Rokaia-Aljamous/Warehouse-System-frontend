@@ -5,7 +5,6 @@ import 'package:image_picker/image_picker.dart';
 import 'package:provider/provider.dart';
 import 'package:stock_app/controllers/driver_controller.dart';
 import 'package:stock_app/utils/constants.dart';
-import 'package:stock_app/views/screens/driver/driver_profile_screen.dart';
 import 'package:stock_app/views/widgets/auth_widgets.dart';
 
 class DriverEditProfileScreen extends StatefulWidget {
@@ -20,33 +19,70 @@ class DriverEditProfileScreen extends StatefulWidget {
 
 class _DriverEditProfileScreenState extends State<DriverEditProfileScreen> {
   final _nameController = TextEditingController();
+  final _usernameController = TextEditingController();
   final _phoneController = TextEditingController();
   final _birthdayController = TextEditingController();
-  bool _didPrefill = false;
+  bool _initialized = false;
+  bool _isEditing = false;
   File? _pickedImage;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      context.read<DriverController>().fetchProfile();
+    });
+  }
 
   @override
   void dispose() {
     _nameController.dispose();
+    _usernameController.dispose();
     _phoneController.dispose();
     _birthdayController.dispose();
     super.dispose();
   }
 
   void _prefill(DriverController controller) {
-    if (_didPrefill || controller.profile == null) return;
+    if ((_initialized && _isEditing) || controller.profile == null) return;
     final profile = controller.profile!;
     _nameController.text = profile.fullName;
+    _usernameController.text = profile.userName;
     _phoneController.text = profile.phoneNumber;
     _birthdayController.text = profile.birthday ?? '';
-    _didPrefill = true;
+    _initialized = true;
+  }
+
+  Future<void> _pickBirthday() async {
+    if (!_isEditing) return;
+
+    final now = DateTime.now();
+    final initial =
+        DateTime.tryParse(_birthdayController.text) ??
+        DateTime(now.year - 20, now.month, now.day);
+    final picked = await showDatePicker(
+      context: context,
+      initialDate: initial,
+      firstDate: DateTime(1950),
+      lastDate: now,
+    );
+
+    if (picked != null && mounted) {
+      setState(() {
+        _birthdayController.text =
+            '${picked.year.toString().padLeft(4, '0')}-'
+            '${picked.month.toString().padLeft(2, '0')}-'
+            '${picked.day.toString().padLeft(2, '0')}';
+      });
+    }
   }
 
   Future<void> _pickPhoto() async {
+    if (!_isEditing) return;
+
     final image = await ImagePicker().pickImage(
       source: ImageSource.gallery,
-      imageQuality: 82,
-      maxWidth: 1600,
+      imageQuality: 80,
     );
     if (image != null && mounted) {
       setState(() => _pickedImage = File(image.path));
@@ -75,10 +111,13 @@ class _DriverEditProfileScreenState extends State<DriverEditProfileScreen> {
 
     if (!mounted) return;
     if (success) {
+      setState(() {
+        _isEditing = false;
+        _pickedImage = null;
+      });
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Driver profile updated successfully')),
+        const SnackBar(content: Text('Profile updated successfully')),
       );
-      widget.onBack();
     } else {
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
@@ -101,105 +140,172 @@ class _DriverEditProfileScreenState extends State<DriverEditProfileScreen> {
             children: [
               ReceivingTopHeader(
                 height: MediaQuery.of(context).size.height * 0.22,
-                title: 'Edit Driver Profile',
+                title: 'Edit Profile',
               ),
               Positioned(
-                top: MediaQuery.of(context).padding.top + 6,
-                left: 8,
+                top: 0,
+                left: 0,
+                child: SafeArea(
+                  bottom: false,
+                  child: SizedBox(
+                    width: 56,
+                    height: 56,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.opaque,
+                      onTap: widget.onBack,
+                    ),
+                  ),
+                ),
+              ),
+              Positioned(
+                top: MediaQuery.of(context).padding.top + 10,
+                right: 10,
                 child: IconButton(
-                  onPressed: widget.onBack,
-                  icon: const Icon(Icons.arrow_back, color: Colors.white),
+                  icon: Icon(
+                    _isEditing ? Icons.edit : Icons.edit_outlined,
+                    color: Colors.white,
+                  ),
+                  onPressed: () => setState(() => _isEditing = !_isEditing),
                 ),
               ),
             ],
           ),
           Expanded(
             child: Transform.translate(
-              offset: const Offset(0, -34),
+              offset: const Offset(0, -28),
               child: ListView(
-                padding: const EdgeInsets.symmetric(horizontal: 24),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 24,
+                  vertical: 8,
+                ),
                 children: [
                   Center(
                     child: GestureDetector(
                       onTap: _pickPhoto,
                       child: Stack(
                         children: [
-                          if (_pickedImage != null)
-                            ClipOval(
-                              child: Image.file(
-                                _pickedImage!,
-                                width: 88,
-                                height: 88,
-                                fit: BoxFit.cover,
-                              ),
-                            )
-                          else
-                            DriverProfileAvatar(
-                              imageUrl: controller.profile?.imageUrl,
-                              radius: 44,
-                            ),
-                          Positioned(
-                            bottom: 0,
-                            right: 0,
-                            child: Container(
-                              padding: const EdgeInsets.all(6),
-                              decoration: const BoxDecoration(
-                                color: Color(0xFFF3A523),
-                                shape: BoxShape.circle,
-                              ),
-                              child: const Icon(
-                                Icons.camera_alt,
-                                color: Colors.white,
-                                size: 16,
-                              ),
-                            ),
+                          CircleAvatar(
+                            radius: 40,
+                            backgroundColor: Colors.white,
+                            backgroundImage: _pickedImage != null
+                                ? FileImage(_pickedImage!)
+                                : (controller.profile?.imageUrl != null &&
+                                      controller.profile!.imageUrl!.isNotEmpty)
+                                ? NetworkImage(controller.profile!.imageUrl!)
+                                      as ImageProvider
+                                : null,
+                            child:
+                                (_pickedImage == null &&
+                                    (controller.profile?.imageUrl == null ||
+                                        controller.profile!.imageUrl!.isEmpty))
+                                ? const Icon(
+                                    Icons.person,
+                                    size: 40,
+                                    color: AppColors.navy,
+                                  )
+                                : null,
                           ),
+                          if (_isEditing)
+                            Positioned(
+                              bottom: 0,
+                              right: 0,
+                              child: Container(
+                                padding: const EdgeInsets.all(4),
+                                decoration: const BoxDecoration(
+                                  color: AppColors.navy,
+                                  shape: BoxShape.circle,
+                                ),
+                                child: const Icon(
+                                  Icons.camera_alt,
+                                  size: 16,
+                                  color: Colors.white,
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
                   ),
-                  const SizedBox(height: 24),
+                  const SizedBox(height: 16),
+                  const _DriverFieldLabel('Full Name'),
+                  const SizedBox(height: 6),
                   _DriverField(
                     controller: _nameController,
-                    label: 'Full Name',
                     icon: Icons.person_outline,
+                    enabled: _isEditing,
                   ),
                   const SizedBox(height: 14),
+                  const _DriverFieldLabel('Username'),
+                  const SizedBox(height: 6),
+                  _DriverField(
+                    controller: _usernameController,
+                    icon: Icons.badge_outlined,
+                    enabled: false,
+                  ),
+                  const SizedBox(height: 14),
+                  const _DriverFieldLabel('Phone Number'),
+                  const SizedBox(height: 6),
                   _DriverField(
                     controller: _phoneController,
-                    label: 'Phone Number',
                     icon: Icons.phone_outlined,
                     keyboardType: TextInputType.phone,
+                    enabled: _isEditing,
                   ),
                   const SizedBox(height: 14),
-                  _DriverField(
-                    controller: _birthdayController,
-                    label: 'Birthday (YYYY-MM-DD)',
-                    icon: Icons.cake_outlined,
-                  ),
-                  const SizedBox(height: 24),
-                  SizedBox(
-                    height: 52,
-                    child: ElevatedButton.icon(
-                      onPressed: controller.isSavingProfile ? null : _save,
-                      icon: controller.isSavingProfile
-                          ? const SizedBox(
-                              width: 18,
-                              height: 18,
-                              child: CircularProgressIndicator(strokeWidth: 2),
-                            )
-                          : const Icon(Icons.check_circle_outline),
-                      label: const Text('Save Changes'),
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: AppColors.navy,
-                        foregroundColor: Colors.white,
-                        shape: RoundedRectangleBorder(
-                          borderRadius: BorderRadius.circular(13),
-                        ),
+                  const _DriverFieldLabel('Birthday'),
+                  const SizedBox(height: 6),
+                  GestureDetector(
+                    onTap: _pickBirthday,
+                    child: AbsorbPointer(
+                      child: _DriverField(
+                        controller: _birthdayController,
+                        icon: Icons.cake_outlined,
+                        enabled: _isEditing,
                       ),
                     ),
                   ),
-                  const SizedBox(height: 120),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 50,
+                    child: ElevatedButton(
+                      onPressed: _isEditing && !controller.isSavingProfile
+                          ? _save
+                          : null,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.white,
+                        side: const BorderSide(color: AppColors.navy),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
+                      ),
+                      child: controller.isSavingProfile
+                          ? const SizedBox(
+                              width: 20,
+                              height: 20,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Row(
+                              mainAxisAlignment: MainAxisAlignment.center,
+                              children: [
+                                Text(
+                                  'Save Changes',
+                                  style: TextStyle(
+                                    color: AppColors.navy,
+                                    fontWeight: FontWeight.bold,
+                                  ),
+                                ),
+                                SizedBox(width: 8),
+                                Icon(
+                                  Icons.check_circle_outline,
+                                  color: AppColors.navy,
+                                  size: 20,
+                                ),
+                              ],
+                            ),
+                    ),
+                  ),
+                  const SizedBox(height: 150),
                 ],
               ),
             ),
@@ -210,32 +316,53 @@ class _DriverEditProfileScreenState extends State<DriverEditProfileScreen> {
   }
 }
 
+class _DriverFieldLabel extends StatelessWidget {
+  final String text;
+
+  const _DriverFieldLabel(this.text);
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      text,
+      style: const TextStyle(fontSize: 14, color: Colors.black87),
+    );
+  }
+}
+
 class _DriverField extends StatelessWidget {
   final TextEditingController controller;
-  final String label;
   final IconData icon;
   final TextInputType keyboardType;
+  final bool enabled;
 
   const _DriverField({
     required this.controller,
-    required this.label,
     required this.icon,
     this.keyboardType = TextInputType.text,
+    this.enabled = true,
   });
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: controller,
-      keyboardType: keyboardType,
-      decoration: InputDecoration(
-        labelText: label,
-        prefixIcon: Icon(icon, color: const Color(0xFFF3A523)),
-        filled: true,
-        fillColor: Colors.white,
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-          borderSide: BorderSide.none,
+    return Container(
+      decoration: BoxDecoration(
+        color: enabled ? Colors.white : Colors.grey.shade100,
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: Colors.grey.shade300),
+      ),
+      child: TextField(
+        controller: controller,
+        keyboardType: keyboardType,
+        enabled: enabled,
+        style: const TextStyle(
+          color: AppColors.navy,
+          fontWeight: FontWeight.w500,
+        ),
+        decoration: InputDecoration(
+          prefixIcon: Icon(icon, color: Colors.black54, size: 20),
+          border: InputBorder.none,
+          contentPadding: const EdgeInsets.all(16),
         ),
       ),
     );

@@ -3,14 +3,16 @@ import 'package:provider/provider.dart';
 import 'package:stock_app/providers/auth_provider.dart';
 import 'package:stock_app/controllers/order_controller.dart';
 import 'package:stock_app/controllers/destruction_controller.dart';
+import 'package:stock_app/services/firebase_messaging_manager.dart';
 import 'package:stock_app/views/screens/common/login_screen.dart';
 // تأكدي أن المسارات أدناه تطابق مجلدات مشروعكِ الحالية
 import 'utils/constants.dart';
 import 'views/screens/common/welcome_screen.dart';
 
-void main() {
+Future<void> main() async {
   // 👈 خطوة أمان أساسية لتهيئة خدمات فلاتر قبل إقلاع التطبيق ومنع أي كراش بالثيم والخطوط
   WidgetsFlutterBinding.ensureInitialized();
+  await FirebaseMessagingManager.instance.initialize();
 
   // ---- منطق المصادقة مأخوذ من المشروع الأول (لم يتم لمسه) ----
   // ---- OrderController أُضيف هون فقط لتفعيل ربط شاشات المهام بالباك إند ----
@@ -32,7 +34,7 @@ class MyApp extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
-     title: 'Stock Tereaq',
+      title: 'Stock Tereaq',
       debugShowCheckedModeBanner: false,
 
       // ---- تطبيق الثيم الشامل والموحد بدقة الفيغما ----
@@ -41,7 +43,7 @@ class MyApp extends StatelessWidget {
       // ---- الشاشة الأولى للتطبيق ----
       themeMode: ThemeMode
           .light, // إجبار التطبيق على الوضع الفاتح ليتطابق مع ألوان التصميم دائماً
-     home: const LoginScreen(role: ''),
+      home: const LoginScreen(role: ''),
 
       // ---- المسارات (Routes) — جاهزة لتفعيلها بمجرد بناء شاشة تسجيل الدخول ----
       // routes: {

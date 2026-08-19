@@ -151,9 +151,15 @@ class AuthService {
         data: {'user_name': userName, 'password': password},
       );
 
-      final body = response.data is Map<String, dynamic>
-          ? response.data as Map<String, dynamic>
-          : Map<String, dynamic>.from(response.data ?? {});
+      final rawBody = response.data;
+      if (rawBody is! Map) {
+        return {
+          'success': false,
+          'statusCode': response.statusCode,
+          'message': 'Unexpected response from the server',
+        };
+      }
+      final body = Map<String, dynamic>.from(rawBody);
 
       token = body['token']?.toString();
       final workerJson = body['worker'];
@@ -195,7 +201,7 @@ class AuthService {
         'success': false,
         'message': 'Request timed out. Please try again.',
       };
-    } on Exception catch (e) {
+    } catch (e) {
       return {'success': false, 'message': e.toString()};
     }
   }

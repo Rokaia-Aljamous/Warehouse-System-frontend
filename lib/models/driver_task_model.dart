@@ -32,6 +32,19 @@ class DriverTaskItem {
       quantity: (json['quantity'] as num?)?.toInt() ?? 0,
     );
   }
+
+  factory DriverTaskItem.fromReturnJson(Map<String, dynamic> json) {
+    final orderItem = _asMap(json['order_item']);
+    final product = _asMap(orderItem['product']);
+
+    return DriverTaskItem(
+      productId:
+          (product['id'] as num?)?.toInt() ??
+          (orderItem['product_id'] as num?)?.toInt(),
+      name: product['name']?.toString() ?? 'Product',
+      quantity: (json['quantity'] as num?)?.toInt() ?? 0,
+    );
+  }
 }
 
 class DriverTask {
@@ -39,6 +52,7 @@ class DriverTask {
   final DriverTaskType? type;
   final String status;
   final int? relatedId;
+  final int? orderId;
   final String? relatedType;
   final String? relatedStatus;
   final int? customerId;
@@ -66,6 +80,7 @@ class DriverTask {
     required this.type,
     required this.status,
     this.relatedId,
+    this.orderId,
     this.relatedType,
     this.relatedStatus,
     this.customerId,
@@ -95,12 +110,17 @@ class DriverTask {
     final fromWarehouse = _asMap(related['from_warehouse']);
     final toWarehouse = _asMap(related['to_warehouse']);
     final rawItems = related['returned_items'];
+    final type = DriverTaskType.fromString(json['task_type']?.toString());
+    final relatedId = (json['related_id'] as num?)?.toInt();
 
     return DriverTask(
       id: (json['id'] as num?)?.toInt() ?? 0,
-      type: DriverTaskType.fromString(json['task_type']?.toString()),
+      type: type,
       status: json['status']?.toString() ?? '',
-      relatedId: (json['related_id'] as num?)?.toInt(),
+      relatedId: relatedId,
+      orderId:
+          (related['order_id'] as num?)?.toInt() ??
+          (type == DriverTaskType.orderDelivery ? relatedId : null),
       relatedType: json['related_type']?.toString(),
       relatedStatus: related['status']?.toString(),
       customerId: (customer['id'] as num?)?.toInt(),
@@ -130,6 +150,89 @@ class DriverTask {
           : const [],
       createdAt: DateTime.tryParse(json['created_at']?.toString() ?? ''),
       updatedAt: DateTime.tryParse(json['updated_at']?.toString() ?? ''),
+    );
+  }
+
+  DriverTask withOrderDetails(Map<String, dynamic> order) {
+    final customer = _asMap(order['customer']);
+    final orderItems = order['items'];
+
+    return DriverTask(
+      id: id,
+      type: type,
+      status: status,
+      relatedId: relatedId,
+      orderId: (order['id'] as num?)?.toInt() ?? orderId,
+      relatedType: relatedType,
+      relatedStatus: order['status']?.toString() ?? relatedStatus,
+      customerId: (customer['id'] as num?)?.toInt() ?? customerId,
+      customerName: customer['full_name']?.toString() ?? customerName,
+      customerPhone: customer['phone_number']?.toString() ?? customerPhone,
+      destinationLabel:
+          order['customer_location']?.toString() ?? destinationLabel,
+      deliveryRegion: order['delivery_region']?.toString() ?? deliveryRegion,
+      destinationLatitude:
+          _asDouble(order['customer_latitude']) ?? destinationLatitude,
+      destinationLongitude:
+          _asDouble(order['customer_longitude']) ?? destinationLongitude,
+      orderQrCode: order['order_qr_code']?.toString() ?? orderQrCode,
+      totalPrice: _asDouble(order['total_price']) ?? totalPrice,
+      itemsCount: orderItems is List ? orderItems.length : itemsCount,
+      returnReason: returnReason,
+      returnType: returnType,
+      fromWarehouseName: fromWarehouseName,
+      fromWarehouseLocation: fromWarehouseLocation,
+      toWarehouseName: toWarehouseName,
+      toWarehouseLocation: toWarehouseLocation,
+      items: items,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
+    );
+  }
+
+  DriverTask withReturnDetails(Map<String, dynamic> returnData) {
+    final order = _asMap(returnData['order']);
+    final rawItems = returnData['items'];
+
+    return DriverTask(
+      id: id,
+      type: type,
+      status: status,
+      relatedId: relatedId,
+      orderId:
+          (returnData['order_id'] as num?)?.toInt() ??
+          (order['id'] as num?)?.toInt() ??
+          orderId,
+      relatedType: relatedType,
+      relatedStatus: returnData['status']?.toString() ?? relatedStatus,
+      customerId: customerId,
+      customerName: customerName,
+      customerPhone: customerPhone,
+      destinationLabel: destinationLabel,
+      deliveryRegion: deliveryRegion,
+      destinationLatitude: destinationLatitude,
+      destinationLongitude: destinationLongitude,
+      orderQrCode: order['order_qr_code']?.toString() ?? orderQrCode,
+      totalPrice: totalPrice,
+      itemsCount: rawItems is List ? rawItems.length : itemsCount,
+      returnReason: returnData['return_reason']?.toString() ?? returnReason,
+      returnType: returnData['return_type']?.toString() ?? returnType,
+      fromWarehouseName: fromWarehouseName,
+      fromWarehouseLocation: fromWarehouseLocation,
+      toWarehouseName: toWarehouseName,
+      toWarehouseLocation: toWarehouseLocation,
+      items: rawItems is List
+          ? rawItems
+                .whereType<Map>()
+                .map(
+                  (item) => DriverTaskItem.fromReturnJson(
+                    Map<String, dynamic>.from(item),
+                  ),
+                )
+                .toList()
+          : items,
+      createdAt: createdAt,
+      updatedAt: updatedAt,
     );
   }
 

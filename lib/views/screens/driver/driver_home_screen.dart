@@ -1,8 +1,14 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:stock_app/controllers/driver_controller.dart';
+import 'package:stock_app/controllers/driver_notification_controller.dart';
 import 'package:stock_app/models/driver_task_model.dart';
 import 'package:stock_app/utils/constants.dart';
+import 'package:stock_app/views/screens/common/notification_screen.dart';
+import 'package:stock_app/views/screens/driver/driver_completed_tasks_screen.dart';
+import 'package:stock_app/views/screens/driver/driver_edit_profile_screen.dart';
+import 'package:stock_app/views/screens/driver/driver_profile_screen.dart';
+import 'package:stock_app/views/screens/driver/driver_returns_screen.dart';
 import 'package:stock_app/views/screens/driver/driver_task_details_screen.dart';
 import 'package:stock_app/views/widgets/delivery_bottom_nav.dart';
 import 'package:stock_app/views/widgets/driver_task_card.dart';
@@ -12,8 +18,13 @@ class MyTasksScreen extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ChangeNotifierProvider(
-      create: (_) => DriverController()..initialize(),
+    return MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => DriverController()..initialize()),
+        ChangeNotifierProvider(
+          create: (_) => DriverNotificationController()..initialize(),
+        ),
+      ],
       child: const _DriverShell(),
     );
   }
@@ -27,6 +38,8 @@ class _DriverShell extends StatefulWidget {
 }
 
 class _DriverShellState extends State<_DriverShell> {
+  int _currentIndex = 0;
+
   Future<void> _openTask(DriverTask task) async {
     final controller = context.read<DriverController>();
     await Navigator.push(
@@ -41,25 +54,92 @@ class _DriverShellState extends State<_DriverShell> {
     if (mounted) await controller.refreshAll();
   }
 
+  Future<void> _openEditProfile() async {
+    final controller = context.read<DriverController>();
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => ChangeNotifierProvider.value(
+          value: controller,
+          child: DriverEditProfileScreen(
+            onBack: () => Navigator.of(context).pop(),
+          ),
+        ),
+      ),
+    );
+    if (mounted) await controller.fetchProfile();
+  }
+
+  Future<void> _openNotifications() async {
+    final controller = context.read<DriverNotificationController>();
+    await controller.refresh();
+    if (!mounted) return;
+
+    await Navigator.push(
+      context,
+      MaterialPageRoute(
+        builder: (_) => NotificationScreen(driverController: controller),
+      ),
+    );
+    if (mounted) await controller.refresh();
+  }
+
+  void _selectPage(int index) {
+    if (_currentIndex == index) return;
+    setState(() => _currentIndex = index);
+
+    final controller = context.read<DriverController>();
+    if (index == 1) {
+      controller.fetchProfile();
+    } else if (index == 2 || index == 3) {
+      controller.fetchTasks();
+    }
+  }
+
   @override
   Widget build(BuildContext context) {
     return Scaffold(
       backgroundColor: AppColors.beige,
-      body: _DriverHomePage(onOpenTask: _openTask),
-      bottomNavigationBar: DeliveryBottomNav(currentIndex: 0, onTap: (_) {}),
+      body: IndexedStack(
+        index: _currentIndex,
+        children: [
+          _DriverHomePage(
+            onOpenTask: _openTask,
+            onOpenNotifications: _openNotifications,
+          ),
+          DriverProfileScreen(onEditProfile: _openEditProfile),
+          DriverCompletedTasksScreen(onOpenTask: _openTask),
+          DriverReturnsScreen(onOpenTask: _openTask),
+        ],
+      ),
+      bottomNavigationBar: DeliveryBottomNav(
+        currentIndex: _currentIndex,
+        onTap: _selectPage,
+      ),
     );
   }
 }
 
 class _DriverHomePage extends StatelessWidget {
   final ValueChanged<DriverTask> onOpenTask;
+  final VoidCallback onOpenNotifications;
 
-  const _DriverHomePage({required this.onOpenTask});
+  const _DriverHomePage({
+    required this.onOpenTask,
+    required this.onOpenNotifications,
+  });
 
   @override
   Widget build(BuildContext context) {
     final controller = context.watch<DriverController>();
     final summary = controller.summary;
+    final visibleWorkload = controller.pendingTasks.length + summary.completed;
+    final visibleTotal = summary.total < visibleWorkload
+        ? visibleWorkload
+        : summary.total;
+    final visiblePercentage = visibleTotal == 0
+        ? 0.0
+        : (summary.completed / visibleTotal) * 100;
 
     return Scaffold(
       backgroundColor: AppColors.beige,
@@ -68,14 +148,16 @@ class _DriverHomePage extends StatelessWidget {
         child: CustomScrollView(
           physics: const AlwaysScrollableScrollPhysics(),
           slivers: [
-            const SliverToBoxAdapter(child: _DriverHeader()),
+            SliverToBoxAdapter(
+              child: _DriverHeader(onOpenNotifications: onOpenNotifications),
+            ),
             SliverPadding(
               padding: const EdgeInsets.fromLTRB(24, 18, 24, 14),
               sliver: SliverToBoxAdapter(
                 child: _SummaryCard(
-                  total: summary.total,
+                  total: visibleTotal,
                   completed: summary.completed,
-                  percentage: summary.completionPercentage,
+                  percentage: visiblePercentage,
                   isLoading: controller.isLoadingSummary,
                 ),
               ),
@@ -259,7 +341,9 @@ class _SummaryCard extends StatelessWidget {
 }
 
 class _DriverHeader extends StatelessWidget {
-  const _DriverHeader();
+  final VoidCallback onOpenNotifications;
+
+  const _DriverHeader({required this.onOpenNotifications});
 
   @override
   Widget build(BuildContext context) {
@@ -304,10 +388,14 @@ class _DriverHeader extends StatelessWidget {
               ],
             ),
           ),
-          const Icon(
-            Icons.local_shipping_outlined,
-            color: Color(0xFFF3A523),
-            size: 42,
+          IconButton(
+            onPressed: onOpenNotifications,
+            tooltip: 'Notifications',
+            icon: const Icon(
+              Icons.notifications_none_rounded,
+              color: Color(0xFFF3A523),
+              size: 36,
+            ),
           ),
         ],
       ),

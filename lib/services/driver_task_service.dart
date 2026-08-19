@@ -36,15 +36,62 @@ class DriverTaskService {
   }
 
   Future<Map<String, dynamic>> getTasks() async {
-    return _get('/api/workers/tasks', 'Failed to load driver tasks');
+    return _get(Api.tasks, 'Failed to load driver tasks');
   }
 
   Future<Map<String, dynamic>> getDailySummary() async {
-    return _get('/api/workers/tasks/summary', 'Failed to load today summary');
+    return _get(Api.taskSummary, 'Failed to load today summary');
   }
 
   Future<Map<String, dynamic>> getTaskDetails(int taskId) async {
-    return _get('/api/workers/tasks/$taskId', 'Failed to load task details');
+    return _get(Api.taskDetails(taskId), 'Failed to load task details');
+  }
+
+  Future<Map<String, dynamic>> getOrderDetails(int orderId) async {
+    return _get(
+      Api.orderDetails(orderId),
+      'Failed to load customer and destination details',
+    );
+  }
+
+  Future<Map<String, dynamic>> getReturnDetails(int returnId) async {
+    return _get(
+      Api.returnDetails(returnId),
+      'Failed to load return pickup details',
+    );
+  }
+
+  Future<Map<String, dynamic>> scanTaskBarcode({
+    required int taskId,
+    required String barcode,
+  }) async {
+    try {
+      final response = await _dio.post(
+        Api.taskScan(taskId),
+        data: {'barcode': barcode},
+      );
+      final body = response.data is Map
+          ? Map<String, dynamic>.from(response.data as Map)
+          : <String, dynamic>{};
+
+      return {
+        'success': body['matched'] == true,
+        'statusCode': response.statusCode,
+        'data': body,
+        'message':
+            body['warning']?.toString() ??
+            body['message']?.toString() ??
+            'Barcode scanned successfully',
+      };
+    } on DioException catch (error) {
+      return _handleDioError(error, 'Barcode does not match this task');
+    } on SocketException {
+      return {'success': false, 'message': 'No internet connection'};
+    } on TimeoutException {
+      return {'success': false, 'message': 'Request timed out'};
+    } on Exception catch (error) {
+      return {'success': false, 'message': error.toString()};
+    }
   }
 
   Future<Map<String, dynamic>> updateCurrentLocation({
@@ -53,7 +100,7 @@ class DriverTaskService {
   }) async {
     try {
       final response = await _dio.post(
-        '/api/workers/location',
+        Api.driverLocation,
         data: {'latitude': latitude, 'longitude': longitude},
       );
 

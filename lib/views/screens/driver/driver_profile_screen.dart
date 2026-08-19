@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:provider/provider.dart';
 import 'package:stock_app/controllers/driver_controller.dart';
+import 'package:stock_app/controllers/driver_notification_controller.dart';
 import 'package:stock_app/providers/auth_provider.dart';
 import 'package:stock_app/utils/constants.dart';
 import 'package:stock_app/views/screens/common/login_screen.dart';
@@ -22,6 +23,8 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
     if (_isLoggingOut) return;
     setState(() => _isLoggingOut = true);
 
+    await context.read<DriverNotificationController>().unregisterDevice();
+    if (!mounted) return;
     await context.read<AuthProvider>().logout();
     if (!mounted) return;
 
@@ -43,7 +46,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
         children: [
           ReceivingTopHeader(
             height: MediaQuery.of(context).size.height * 0.22,
-            title: 'Driver Profile',
+            title: 'Account',
           ),
           Expanded(
             child: Transform.translate(
@@ -72,7 +75,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                               children: [
                                 DriverProfileAvatar(
                                   imageUrl: profile?.imageUrl,
-                                  radius: 42,
+                                  radius: 36,
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
@@ -85,7 +88,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                                     color: AppColors.navy,
                                   ),
                                 ),
-                                const SizedBox(height: 20),
+                                const SizedBox(height: 16),
                                 _ProfileLine(
                                   icon: Icons.badge_outlined,
                                   value: profile?.userName ?? '—',
@@ -95,18 +98,11 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                                   icon: Icons.phone_outlined,
                                   value: profile?.phoneNumber ?? '—',
                                 ),
-                                const SizedBox(height: 12),
-                                _ProfileLine(
-                                  icon: Icons.local_shipping_outlined,
-                                  value: 'Driver',
-                                ),
                                 const SizedBox(height: 20),
                                 SizedBox(
                                   width: double.infinity,
-                                  child: OutlinedButton.icon(
+                                  child: OutlinedButton(
                                     onPressed: widget.onEditProfile,
-                                    icon: const Icon(Icons.edit_outlined),
-                                    label: const Text('Edit Profile'),
                                     style: OutlinedButton.styleFrom(
                                       foregroundColor: AppColors.navy,
                                       side: const BorderSide(
@@ -119,6 +115,7 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                                         borderRadius: BorderRadius.circular(12),
                                       ),
                                     ),
+                                    child: const Text('edit profile'),
                                   ),
                                 ),
                               ],
@@ -132,35 +129,48 @@ class _DriverProfileScreenState extends State<DriverProfileScreen> {
                         style: const TextStyle(color: Colors.redAccent),
                       ),
                     ],
-                    const SizedBox(height: 18),
-                    Container(
-                      decoration: BoxDecoration(
-                        color: Colors.white,
-                        borderRadius: BorderRadius.circular(18),
-                      ),
-                      child: ListTile(
-                        onTap: _isLoggingOut ? null : _logout,
-                        leading: _isLoggingOut
-                            ? const SizedBox(
-                                width: 20,
-                                height: 20,
-                                child: CircularProgressIndicator(
-                                  strokeWidth: 2,
-                                ),
-                              )
-                            : const Icon(
-                                Icons.logout,
-                                color: Color(0xFFF3A523),
-                              ),
-                        title: const Text('Logout'),
-                        trailing: const Icon(Icons.chevron_right),
-                      ),
-                    ),
+                    const SizedBox(height: 20),
+                    _settingsContainer(),
                     const SizedBox(height: 120),
                   ],
                 ),
               ),
             ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _settingsContainer() {
+    return Container(
+      decoration: BoxDecoration(
+        color: Colors.white,
+        borderRadius: BorderRadius.circular(20),
+      ),
+      child: Column(
+        children: [
+          const ListTile(
+            leading: Icon(Icons.language),
+            title: Text('Language'),
+            trailing: Icon(Icons.chevron_right),
+          ),
+          ListTile(
+            leading: const Icon(Icons.dark_mode),
+            title: const Text('Dark Mode'),
+            trailing: Switch(value: false, onChanged: (_) {}),
+          ),
+          ListTile(
+            onTap: _isLoggingOut ? null : _logout,
+            leading: _isLoggingOut
+                ? const SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(strokeWidth: 2),
+                  )
+                : const Icon(Icons.logout),
+            title: const Text('Logout'),
+            trailing: const Icon(Icons.chevron_right),
           ),
         ],
       ),
@@ -200,7 +210,7 @@ class DriverProfileAvatar extends StatelessWidget {
 
   Widget _fallback() {
     return Container(
-      color: Colors.white,
+      color: AppColors.beige,
       alignment: Alignment.center,
       child: Icon(Icons.person, size: radius, color: AppColors.navy),
     );
@@ -217,7 +227,7 @@ class _ProfileLine extends StatelessWidget {
   Widget build(BuildContext context) {
     return Row(
       children: [
-        Icon(icon, color: const Color(0xFFF3A523), size: 21),
+        Icon(icon, color: Colors.black54, size: 20),
         const SizedBox(width: 12),
         Expanded(
           child: Text(
